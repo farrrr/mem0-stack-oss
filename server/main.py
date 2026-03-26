@@ -1205,6 +1205,168 @@ async def list_requests(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Entity management endpoints ---
+@app.get("/entities/by-type", summary="List entities by type", dependencies=[Depends(verify_maintenance_key)])
+async def list_entities_by_type(
+    entity_type: str = Query(..., description="Entity type: user, agent, app, run"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """List all entities of a given type with memory counts."""
+    FIELD_MAP = {
+        "user": "payload->>'user_id'",
+        "agent": "payload->>'agent_id'",
+        "app": "payload->'metadata'->>'app_id'",
+        "run": "payload->>'run_id'",
+    }
+    if entity_type not in FIELD_MAP:
+        raise HTTPException(status_code=400, detail=f"entity_type must be one of: {', '.join(FIELD_MAP)}")
+    field_expr = FIELD_MAP[entity_type]
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT entity_id, memory_count, updated_at, COUNT(*) OVER() AS total
+                        FROM (
+                            SELECT {field_expr} AS entity_id,
+                                   COUNT(*) AS memory_count,
+                                   COALESCE(
+                                       MAX((payload->>'updated_at')::timestamptz),
+                                       MAX((payload->>'created_at')::timestamptz)
+                                   ) AS updated_at
+                            FROM memories WHERE {field_expr} IS NOT NULL
+                            GROUP BY 1
+                        ) sub
+                        ORDER BY updated_at DESC NULLS LAST
+                        LIMIT %s OFFSET %s
+                    """, (limit, offset))
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_query)
+        total = rows[0][3] if rows else 0
+        entities = [
+            {"id": r[0], "updated_at": r[2].isoformat() if r[2] else None, "memory_count": r[1]}
+            for r in rows
+        ]
+        return {"entity_type": entity_type, "entities": entities, "total": total}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in list_entities_by_type:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/entities/users", summary="List all users", dependencies=[Depends(verify_maintenance_key)])
+async def list_entity_users():
+    """List all distinct user_ids with memory and agent counts."""
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT payload->>'user_id' AS uid,
+                               COUNT(*) AS memory_count,
+                               COUNT(DISTINCT payload->>'agent_id')
+                                   FILTER (WHERE payload->>'agent_id' IS NOT NULL) AS agent_count
+                        FROM memories WHERE payload->>'user_id' IS NOT NULL
+                        GROUP BY uid ORDER BY memory_count DESC
+                    """)
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_query)
+        return {"users": [{"user_id": r[0], "memory_count": r[1], "agent_count": r[2]} for r in rows]}
+    except Exception as e:
+        logger.exception("Error in list_entity_users:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/entities", summary="List entities for a user")
+async def list_entities(
+    user_id: str = Query(..., description="User ID"),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """List agents and apps under a user with memory counts."""
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM memories WHERE payload->>'user_id' = %s", (user_id,))
+                    total = cur.fetchone()[0]
+                    cur.execute("""
+                        SELECT payload->>'agent_id', COUNT(*) FROM memories
+                        WHERE payload->>'user_id' = %s AND payload->>'agent_id' IS NOT NULL
+                        GROUP BY 1 ORDER BY COUNT(*) DESC
+                    """, (user_id,))
+                    agents = [{"agent_id": r[0], "memory_count": r[1]} for r in cur.fetchall()]
+                    cur.execute("""
+                        SELECT payload->'metadata'->>'app_id', COUNT(*) FROM memories
+                        WHERE payload->>'user_id' = %s AND payload->'metadata'->>'app_id' IS NOT NULL
+                        GROUP BY 1 ORDER BY COUNT(*) DESC
+                    """, (user_id,))
+                    apps = [{"app_id": r[0], "memory_count": r[1]} for r in cur.fetchall()]
+                    return total, agents, apps
+
+        total, agents, apps = await asyncio.to_thread(_query)
+        return {"user_id": user_id, "agents": agents, "apps": apps, "total_memories": total}
+    except Exception as e:
+        logger.exception("Error in list_entities:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/entities/{entity_type}/{entity_id}", summary="Delete an entity's memories",
+            dependencies=[Depends(verify_maintenance_key)])
+async def delete_entity(
+    entity_type: str,
+    entity_id: str,
+    confirm: bool = Query(False, description="Must be true to confirm deletion"),
+    user_id: Optional[str] = Query(None, description="Required when deleting an agent"),
+    mem0=Depends(get_mem0),
+):
+    """Delete all memories for a user or agent entity."""
+    if entity_type not in ("user", "agent"):
+        raise HTTPException(status_code=400, detail="entity_type must be 'user' or 'agent'")
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Must set confirm=true to execute deletion")
+    if entity_type == "agent" and not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required when deleting an agent")
+    try:
+        if entity_type == "user":
+            result = await mem0.delete_all(user_id=entity_id)
+            # Cleanup orphaned feedback
+            try:
+                def _cleanup():
+                    with get_pg_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("DELETE FROM memory_feedback WHERE user_id = %s", (entity_id,))
+
+                await asyncio.to_thread(_cleanup)
+            except Exception as e:
+                logger.warning("Feedback cleanup failed for user=%s: %s", entity_id, e)
+        else:
+            result = await mem0.delete_all(user_id=user_id, agent_id=entity_id)
+            try:
+                def _cleanup():
+                    with get_pg_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("""
+                                DELETE FROM memory_feedback
+                                WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.id = memory_feedback.memory_id)
+                            """)
+
+                await asyncio.to_thread(_cleanup)
+            except Exception as e:
+                logger.warning("Feedback cleanup failed for agent=%s: %s", entity_id, e)
+
+        logger.warning("DELETE_ENTITY %s=%s", entity_type, entity_id)
+        return {"status": "deleted", "entity_type": entity_type, "entity_id": entity_id, "result": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Error in delete_entity:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- Feedback endpoints ---
 @app.post("/memories/{memory_id}/feedback", summary="Submit feedback for a memory")
 async def submit_feedback(
