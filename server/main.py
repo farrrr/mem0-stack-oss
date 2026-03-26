@@ -9,9 +9,10 @@ Changes from upstream:
 import logging
 import os
 import secrets
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, List, Optional
 
+import psycopg2
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -96,6 +97,24 @@ if not EMBEDDER_API_KEY:
 
 PG_POOL_MIN = int(os.environ.get("PG_POOL_MIN", "2"))
 PG_POOL_MAX = int(os.environ.get("PG_POOL_MAX", "80"))
+
+
+# --- Direct PG connection (for metadata operations outside SDK) ---
+@contextmanager
+def get_pg_conn():
+    """Create a fresh PG connection with auto-commit on success, rollback on error."""
+    conn = psycopg2.connect(
+        dbname=POSTGRES_DB, user=POSTGRES_USER, password=POSTGRES_PASSWORD,
+        host=POSTGRES_HOST, port=int(POSTGRES_PORT),
+    )
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _build_graph_config() -> dict:
@@ -220,6 +239,55 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing AsyncMemory...")
     mem0_instance = await AsyncMemory.from_config(_build_config())
     logger.info("AsyncMemory ready.")
+
+    # Create extension tables for features beyond base SDK
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_requests (
+                    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                    request_type TEXT NOT NULL,
+                    user_id TEXT,
+                    run_id TEXT,
+                    latency_ms INT,
+                    status_code INT DEFAULT 200,
+                    has_results BOOLEAN DEFAULT FALSE,
+                    event_summary JSONB,
+                    req_payload JSONB,
+                    memory_actions JSONB,
+                    retrieved_memories JSONB,
+                    error_msg TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_api_requests_created
+                    ON api_requests(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_api_requests_type
+                    ON api_requests(request_type);
+
+                CREATE TABLE IF NOT EXISTS memory_sources (
+                    id SERIAL PRIMARY KEY,
+                    memory_id UUID NOT NULL,
+                    messages JSONB NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_sources_mid
+                    ON memory_sources(memory_id);
+
+                CREATE TABLE IF NOT EXISTS memory_feedback (
+                    id SERIAL PRIMARY KEY,
+                    memory_id UUID NOT NULL,
+                    user_id TEXT NOT NULL,
+                    feedback TEXT NOT NULL,
+                    reason TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_feedback_mid
+                    ON memory_feedback(memory_id);
+                CREATE INDEX IF NOT EXISTS idx_memory_feedback_uid
+                    ON memory_feedback(user_id);
+            """)
+    logger.info("Extension tables ready.")
+
     yield
     logger.info("Shutting down.")
     mem0_instance = None
