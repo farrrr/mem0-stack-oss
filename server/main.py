@@ -98,6 +98,20 @@ if not EMBEDDER_API_KEY:
 PG_POOL_MIN = int(os.environ.get("PG_POOL_MIN", "2"))
 PG_POOL_MAX = int(os.environ.get("PG_POOL_MAX", "80"))
 
+# --- Custom fact extraction prompt ---
+CUSTOM_PROMPT_PATH = os.environ.get(
+    "CUSTOM_PROMPT_PATH",
+    os.path.join(os.path.dirname(__file__), "prompts", "extraction.txt"),
+)
+_EXTRACTION_TEMPLATE = ""
+_is_custom_prompt_path = "CUSTOM_PROMPT_PATH" in os.environ
+if os.path.exists(CUSTOM_PROMPT_PATH):
+    with open(CUSTOM_PROMPT_PATH) as _f:
+        _EXTRACTION_TEMPLATE = _f.read().strip()
+    logger.info("Custom extraction prompt loaded from %s", CUSTOM_PROMPT_PATH)
+elif _is_custom_prompt_path:
+    logger.warning("CUSTOM_PROMPT_PATH set to %s but file not found", CUSTOM_PROMPT_PATH)
+
 
 # --- Direct PG connection (for metadata operations outside SDK) ---
 @contextmanager
@@ -222,6 +236,10 @@ def _build_config() -> dict:
                 "max_tokens": 4096,
             },
         }
+
+    # Custom extraction prompt — {date} placeholder is replaced by SDK on each add() call
+    if _EXTRACTION_TEMPLATE:
+        config["custom_fact_extraction_prompt"] = _EXTRACTION_TEMPLATE
 
     return config
 
@@ -348,7 +366,7 @@ class MemoryCreate(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     infer: Optional[bool] = Field(None, description="Whether to extract facts from messages. Defaults to True.")
     memory_type: Optional[str] = Field(None, description="Type of memory to store. Only 'procedural_memory' is supported.")
-    prompt: Optional[str] = Field(None, description="Custom prompt to use for fact extraction.")
+    prompt: Optional[str] = Field(None, description="Custom prompt for procedural memory summarization.")
 
 
 class SearchRequest(BaseModel):
