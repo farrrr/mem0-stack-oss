@@ -1717,6 +1717,85 @@ async def feedback_stats(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Statistics endpoint ---
+@app.get("/stats", summary="Memory system statistics")
+async def get_stats(
+    user_id: str = Query(..., description="User ID"),
+    agent_id: Optional[str] = Query(None),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Aggregated statistics: total memories, category distribution, importance, recent activity."""
+    try:
+        base_cond = "payload->>'user_id' = %s"
+        base_params: list = [user_id]
+        if agent_id:
+            base_cond += " AND payload->>'agent_id' = %s"
+            base_params.append(agent_id)
+
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM memories WHERE {base_cond}", base_params)
+                    total = cur.fetchone()[0]
+
+                    cur.execute(f"""
+                        SELECT payload->'metadata'->>'category', COUNT(*)
+                        FROM memories WHERE {base_cond} AND payload->'metadata'->>'category' IS NOT NULL
+                        GROUP BY 1 ORDER BY COUNT(*) DESC
+                    """, base_params)
+                    categories = {r[0]: r[1] for r in cur.fetchall()}
+
+                    cur.execute(f"""
+                        SELECT AVG((payload->'metadata'->>'importance_score')::float)
+                        FROM memories WHERE {base_cond} AND payload->'metadata'->>'importance_score' IS NOT NULL
+                    """, base_params)
+                    avg_row = cur.fetchone()
+                    avg_importance = round(avg_row[0], 4) if avg_row[0] else None
+
+                    cur.execute("""
+                        SELECT request_type, COUNT(*) FROM api_requests
+                        WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days'
+                          AND request_type IN ('ADD', 'SEARCH', 'RECALL')
+                        GROUP BY request_type
+                    """, (user_id,))
+                    recent = {r[0]: r[1] for r in cur.fetchall()}
+
+                    cur.execute(f"""
+                        SELECT COUNT(*) FROM memories WHERE {base_cond}
+                          AND payload->'metadata'->>'expires_at' IS NOT NULL
+                          AND (payload->'metadata'->>'expires_at')::timestamptz < NOW()
+                    """, base_params)
+                    expired = cur.fetchone()[0]
+
+                    cur.execute(f"""
+                        SELECT COUNT(*) FROM memories WHERE {base_cond}
+                          AND payload->'metadata'->>'importance_score' IS NOT NULL
+                          AND (payload->'metadata'->>'importance_score')::float < 0.1
+                    """, base_params)
+                    low_importance = cur.fetchone()[0]
+
+                    return total, categories, avg_importance, recent, expired, low_importance
+
+        total, categories, avg_importance, recent, expired, low_importance = await asyncio.to_thread(_query)
+        return {
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "total_memories": total,
+            "category_counts": categories,
+            "avg_importance_score": avg_importance,
+            "recent_7d": {
+                "add_count": recent.get("ADD", 0),
+                "search_count": recent.get("SEARCH", 0),
+                "recall_count": recent.get("RECALL", 0),
+            },
+            "expired_count": expired,
+            "low_importance_count": low_importance,
+        }
+    except Exception as e:
+        logger.exception("Error in get_stats:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- Classification endpoints ---
 @app.get("/taxonomy", summary="Get classification taxonomy")
 async def get_taxonomy(_api_key: Optional[str] = Depends(verify_api_key)):
@@ -1779,3 +1858,8 @@ async def reclassify_all(
 async def home():
     """Redirect to the OpenAPI documentation."""
     return RedirectResponse(url="/docs")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8090)
