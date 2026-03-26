@@ -589,6 +589,16 @@ class SearchRequest(BaseModel):
     threshold: Optional[float] = Field(None, description="Minimum similarity score for results.")
 
 
+class RecallRequest(BaseModel):
+    query: str = Field(..., description="Search query.")
+    user_id: str = Field(..., description="User ID for long-term memory search.")
+    agent_id: Optional[str] = Field(None, description="Agent ID filter.")
+    run_id: Optional[str] = Field(None, description="Session/run ID for session memory search.")
+    limit: int = Field(6, description="Maximum results to return.", ge=1, le=100)
+    threshold: Optional[float] = Field(None, description="Minimum similarity score filter.")
+    rerank: bool = Field(True, description="Whether to apply reranker on results.")
+
+
 # --- Endpoints ---
 @app.get("/health", summary="Health check")
 async def health():
@@ -682,6 +692,143 @@ async def search_memories(search_req: SearchRequest, mem0=Depends(get_mem0), _ap
         return await mem0.search(query=search_req.query, **params)
     except Exception as e:
         logger.exception("Error in search_memories:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search/recall", summary="Combined long-term + session search")
+async def search_recall(
+    req: RecallRequest,
+    mem0=Depends(get_mem0),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Bypass SDK for combined vector search: long-term (user_id) UNION session (run_id).
+
+    When run_id is provided, queries both long-term and session memories in a single
+    SQL UNION, deduplicates, optionally reranks, and returns merged results.
+    Without run_id, behaves like a standard vector search.
+    """
+    start = time.time()
+    try:
+        # 1. Embed query once
+        embeddings = await asyncio.to_thread(
+            mem0.embedding_model.embed, req.query, "search",
+        )
+        embedding_str = "[" + ",".join(str(x) for x in embeddings) + "]"
+
+        # 2. Build SQL based on run_id presence (run in thread to avoid blocking event loop)
+        def _run_recall_query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    if req.run_id:
+                        base_where = "payload->>'user_id' = %s"
+                        base_params = [req.user_id]
+                        if req.agent_id:
+                            base_where += " AND payload->>'agent_id' = %s"
+                            base_params.append(req.agent_id)
+
+                        cur.execute(f"""
+                            SELECT * FROM (
+                                (SELECT id::text, payload, vector <=> %s::vector AS distance
+                                 FROM memories
+                                 WHERE {base_where}
+                                 ORDER BY vector <=> %s::vector
+                                 LIMIT %s)
+                                UNION ALL
+                                (SELECT id::text, payload, vector <=> %s::vector AS distance
+                                 FROM memories
+                                 WHERE payload->>'user_id' = %s AND payload->>'run_id' = %s
+                                 ORDER BY vector <=> %s::vector
+                                 LIMIT %s)
+                            ) combined
+                            ORDER BY distance
+                        """, (
+                            embedding_str, *base_params, embedding_str, req.limit,
+                            embedding_str, req.user_id, req.run_id, embedding_str, req.limit,
+                        ))
+                    else:
+                        where = "payload->>'user_id' = %s"
+                        params = [req.user_id]
+                        if req.agent_id:
+                            where += " AND payload->>'agent_id' = %s"
+                            params.append(req.agent_id)
+
+                        cur.execute(f"""
+                            SELECT id::text, payload, vector <=> %s::vector AS distance
+                            FROM memories
+                            WHERE {where}
+                            ORDER BY vector <=> %s::vector
+                            LIMIT %s
+                        """, (embedding_str, *params, embedding_str, req.limit))
+
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_run_recall_query)
+
+        # 3. Deduplicate (UNION may produce duplicates)
+        seen = set()
+        results = []
+        for mid, payload, distance in rows:
+            if mid in seen:
+                continue
+            seen.add(mid)
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            score = 1 - distance
+            memory_text = payload.get("data", "") if isinstance(payload, dict) else ""
+            metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+            # Skip suppressed memories
+            if metadata.get("suppressed"):
+                continue
+            results.append({
+                "id": mid,
+                "memory": memory_text,
+                "score": round(score, 4),
+                "metadata": metadata,
+                "user_id": payload.get("user_id", "") if isinstance(payload, dict) else "",
+                "agent_id": payload.get("agent_id", "") if isinstance(payload, dict) else "",
+                "run_id": payload.get("run_id", "") if isinstance(payload, dict) else "",
+            })
+
+        # 4. Rerank if enabled and reranker is available
+        reranked = False
+        if req.rerank and mem0.reranker and results:
+            try:
+                rerank_results = await asyncio.to_thread(
+                    mem0.reranker.rerank,
+                    req.query,
+                    [{"memory": r["memory"]} for r in results],
+                    req.limit,
+                )
+                rerank_order = {
+                    doc["memory"]: (i, doc.get("rerank_score", 0))
+                    for i, doc in enumerate(rerank_results)
+                }
+                for r in results:
+                    if r["memory"] in rerank_order:
+                        r["rerank_score"] = round(rerank_order[r["memory"]][1], 4)
+                reranked_set = {doc["memory"] for doc in rerank_results}
+                results.sort(key=lambda r: rerank_order.get(r["memory"], (len(results), 0))[0])
+                results = [r for r in results if r["memory"] in reranked_set]
+                reranked = True
+            except Exception as e:
+                logger.warning("RECALL rerank failed (fallback to vector order): %s", e)
+
+        # 5. Threshold filter
+        if req.threshold is not None:
+            score_key = "rerank_score" if reranked else "score"
+            results = [r for r in results if r.get(score_key, r["score"]) >= req.threshold]
+
+        # 6. Limit
+        results = results[:req.limit]
+
+        elapsed = time.time() - start
+        logger.info(
+            "RECALL user=%s query='%s' run_id=%s elapsed=%.2fs hits=%d",
+            req.user_id, req.query[:50], req.run_id, elapsed, len(results),
+        )
+        return {"results": results, "elapsed_seconds": round(elapsed, 2)}
+    except Exception as e:
+        logger.exception("Error in search_recall:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
