@@ -447,8 +447,8 @@ function DedupSection({ ensureKey }: { ensureKey: () => boolean }) {
             </tr>
           </thead>
           <tbody>
-            {previewResults.map((r, i) => (
-              <tr key={i} style={{ borderTop: '1px solid var(--color-border)' }}>
+            {previewResults.map((r) => (
+              <tr key={`${r.keep_id}-${r.delete_id}`} style={{ borderTop: '1px solid var(--color-border)' }}>
                 <Td>
                   <div className="flex flex-col gap-0.5">
                     <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>

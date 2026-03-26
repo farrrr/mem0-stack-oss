@@ -506,9 +506,9 @@ export default function MemoriesPage() {
 function ConfidenceBadgeInline({ confidence }: { confidence: string }) {
   const { t } = useTranslation();
   const colorMap: Record<string, { bg: string; text: string }> = {
-    high: { bg: 'var(--color-success)', text: '#fff' },
-    medium: { bg: 'var(--color-warning)', text: '#000' },
-    low: { bg: 'var(--color-danger)', text: '#fff' },
+    high: { bg: 'var(--color-success)', text: 'var(--color-bg-primary)' },
+    medium: { bg: 'var(--color-warning)', text: 'var(--color-text-primary)' },
+    low: { bg: 'var(--color-danger)', text: 'var(--color-bg-primary)' },
   };
   const colors = colorMap[confidence] || { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-primary)' };
   const labelKey = `memories.confidence_${confidence}` as const;
