@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -44,6 +44,8 @@ else:
             MIN_KEY_LENGTH,
         )
     logger.info("API key authentication enabled")
+
+MAINTENANCE_API_KEY = os.environ.get("MAINTENANCE_API_KEY", "")
 
 # --- Config from env ---
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres")
@@ -592,6 +594,13 @@ def get_mem0():
     return mem0_instance
 
 
+async def verify_maintenance_key(x_maintenance_key: Optional[str] = Header(None)):
+    """Validate maintenance API key when MAINTENANCE_API_KEY is configured."""
+    if MAINTENANCE_API_KEY:
+        if not x_maintenance_key or not secrets.compare_digest(x_maintenance_key, MAINTENANCE_API_KEY):
+            raise HTTPException(status_code=403, detail="Invalid maintenance API key.")
+
+
 # --- Models ---
 class Message(BaseModel):
     role: str = Field(..., description="Role of the message (user or assistant).")
@@ -627,6 +636,12 @@ class RecallRequest(BaseModel):
     limit: int = Field(6, description="Maximum results to return.", ge=1, le=100)
     threshold: Optional[float] = Field(None, description="Minimum similarity score filter.")
     rerank: bool = Field(True, description="Whether to apply reranker on results.")
+
+
+class FeedbackRequest(BaseModel):
+    user_id: str = Field(..., description="User ID who submitted the feedback.")
+    feedback: str = Field(..., description="Feedback type: positive, negative, or very_negative.")
+    reason: Optional[str] = Field(None, description="Optional reason for the feedback.")
 
 
 # --- Endpoints ---
@@ -1100,6 +1115,133 @@ async def list_requests(
         return {"items": items, "total": total, "limit": limit, "offset": offset}
     except Exception as e:
         logger.exception("Error in list_requests:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Feedback endpoints ---
+@app.post("/memories/{memory_id}/feedback", summary="Submit feedback for a memory")
+async def submit_feedback(
+    memory_id: str,
+    req: FeedbackRequest,
+    background_tasks: BackgroundTasks,
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Submit feedback for a memory. very_negative auto-suppresses the memory."""
+    start = time.time()
+    try:
+        def _write():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id FROM memories WHERE id = %s AND payload->>'user_id' = %s",
+                        (memory_id, req.user_id),
+                    )
+                    if not cur.fetchone():
+                        return False
+                    cur.execute(
+                        "INSERT INTO memory_feedback (memory_id, user_id, feedback, reason) VALUES (%s, %s, %s, %s)",
+                        (memory_id, req.user_id, req.feedback, req.reason),
+                    )
+                    if req.feedback == "very_negative":
+                        cur.execute(
+                            """UPDATE memories
+                               SET payload = jsonb_set(
+                                   COALESCE(payload, '{}'), '{metadata}',
+                                   COALESCE(payload->'metadata', '{}') || '{"suppressed": true}'::jsonb
+                               )
+                               WHERE id = %s AND payload->>'user_id' = %s""",
+                            (memory_id, req.user_id),
+                        )
+                return True
+
+        found = await asyncio.to_thread(_write)
+        if not found:
+            raise HTTPException(status_code=404, detail="Memory not found for this user.")
+
+        elapsed_ms = int((time.time() - start) * 1000)
+        background_tasks.add_task(
+            log_request, "FEEDBACK", req.user_id, None, elapsed_ms, 200, True,
+            {"memory_id": memory_id, "feedback": req.feedback},
+            {"memory_id": memory_id, "user_id": req.user_id, "feedback": req.feedback},
+        )
+        logger.info("FEEDBACK submitted: memory=%s feedback=%s", memory_id, req.feedback)
+        return {"status": "ok", "memory_id": memory_id, "feedback": req.feedback}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in submit_feedback:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/memories/{memory_id}/feedback", summary="Get feedback for a memory")
+async def get_feedback(memory_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
+    """Retrieve all feedback records for a specific memory."""
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """SELECT id, memory_id, user_id, feedback, reason, created_at
+                           FROM memory_feedback WHERE memory_id = %s
+                           ORDER BY created_at DESC""",
+                        (memory_id,),
+                    )
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_query)
+        results = [
+            {"id": r[0], "memory_id": r[1], "user_id": r[2], "feedback": r[3],
+             "reason": r[4], "created_at": str(r[5])}
+            for r in rows
+        ]
+        return {"memory_id": memory_id, "feedbacks": results, "total": len(results)}
+    except Exception as e:
+        logger.exception("Error in get_feedback:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/feedback/stats", summary="Feedback statistics")
+async def feedback_stats(
+    user_id: str = Query(..., description="User ID to get feedback stats for"),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Feedback counts by type and recent negative feedback."""
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT feedback, COUNT(*) FROM memory_feedback WHERE user_id = %s GROUP BY feedback",
+                        (user_id,),
+                    )
+                    counts = {r[0]: r[1] for r in cur.fetchall()}
+                    cur.execute(
+                        """SELECT mf.memory_id, mf.feedback, mf.reason, mf.created_at,
+                                  COALESCE(m.payload->>'data', m.payload->>'memory') AS memory_text
+                           FROM memory_feedback mf
+                           LEFT JOIN memories m ON m.id = mf.memory_id
+                           WHERE mf.user_id = %s AND mf.feedback IN ('negative', 'very_negative')
+                           ORDER BY mf.created_at DESC LIMIT 10""",
+                        (user_id,),
+                    )
+                    negative_rows = cur.fetchall()
+                    return counts, negative_rows
+
+        counts, negative_rows = await asyncio.to_thread(_query)
+        return {
+            "user_id": user_id,
+            "total": sum(counts.values()),
+            "positive": counts.get("positive", 0),
+            "negative": counts.get("negative", 0),
+            "very_negative": counts.get("very_negative", 0),
+            "recent_negative": [
+                {"memory_id": r[0], "feedback": r[1], "reason": r[2],
+                 "created_at": str(r[3]), "memory_text": (r[4] or "")[:200]}
+                for r in negative_rows
+            ],
+        }
+    except Exception as e:
+        logger.exception("Error in feedback_stats:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
