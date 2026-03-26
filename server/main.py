@@ -300,6 +300,36 @@ def _build_config() -> dict:
     return config
 
 
+# --- Request logging ---
+def log_request(
+    request_type: str, user_id: str, run_id: Optional[str],
+    latency_ms: int, status_code: int, has_results: bool,
+    event_summary: dict, req_payload: dict,
+    memory_actions: Optional[dict] = None,
+    retrieved_memories: Optional[list] = None,
+    error_msg: Optional[str] = None,
+):
+    """Fire-and-forget: log an API request to api_requests table."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO api_requests
+                    (request_type, user_id, run_id, latency_ms, status_code, has_results,
+                     event_summary, req_payload, memory_actions, retrieved_memories, error_msg)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    request_type, user_id, run_id, latency_ms, status_code, has_results,
+                    json.dumps(event_summary, ensure_ascii=False),
+                    json.dumps(req_payload, ensure_ascii=False),
+                    json.dumps(memory_actions, ensure_ascii=False) if memory_actions else None,
+                    json.dumps(retrieved_memories, ensure_ascii=False) if retrieved_memories else None,
+                    error_msg,
+                ))
+    except Exception as e:
+        logger.warning("log_request failed: %s", e)
+
+
 # --- Classification pipeline ---
 def _strip_markdown_fences(raw: str) -> str:
     """Remove markdown code fences from LLM output."""
@@ -635,6 +665,7 @@ async def add_memory(
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
 
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
+    start = time.time()
     try:
         response = await mem0.add(messages=[m.model_dump() for m in memory_create.messages], **params)
 
@@ -647,6 +678,14 @@ async def add_memory(
                     if memory_text:
                         background_tasks.add_task(classify_and_store, r["id"], memory_text)
 
+        elapsed_ms = int((time.time() - start) * 1000)
+        add_results = response.get("results", []) if isinstance(response, dict) else []
+        background_tasks.add_task(
+            log_request, "ADD", memory_create.user_id or "", memory_create.run_id,
+            elapsed_ms, 200, len(add_results) > 0,
+            {"count": len(add_results)},
+            {"user_id": memory_create.user_id, "agent_id": memory_create.agent_id},
+        )
         return JSONResponse(content=response)
     except Exception as e:
         logger.exception("Error in add_memory:")
@@ -685,11 +724,26 @@ async def get_memory(memory_id: str, mem0=Depends(get_mem0), _api_key: Optional[
 
 
 @app.post("/search", summary="Search memories")
-async def search_memories(search_req: SearchRequest, mem0=Depends(get_mem0), _api_key: Optional[str] = Depends(verify_api_key)):
+async def search_memories(
+    search_req: SearchRequest,
+    background_tasks: BackgroundTasks,
+    mem0=Depends(get_mem0),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
     """Search for memories based on a query."""
+    start = time.time()
     try:
         params = {k: v for k, v in search_req.model_dump().items() if v is not None and k != "query"}
-        return await mem0.search(query=search_req.query, **params)
+        result = await mem0.search(query=search_req.query, **params)
+        elapsed_ms = int((time.time() - start) * 1000)
+        hits = result.get("results", result) if isinstance(result, dict) else result
+        background_tasks.add_task(
+            log_request, "SEARCH", search_req.user_id or "", search_req.run_id,
+            elapsed_ms, 200, bool(hits),
+            {"hits": len(hits) if isinstance(hits, list) else 0},
+            {"query": search_req.query, "user_id": search_req.user_id},
+        )
+        return result
     except Exception as e:
         logger.exception("Error in search_memories:")
         raise HTTPException(status_code=500, detail=str(e))
@@ -698,6 +752,7 @@ async def search_memories(search_req: SearchRequest, mem0=Depends(get_mem0), _ap
 @app.post("/search/recall", summary="Combined long-term + session search")
 async def search_recall(
     req: RecallRequest,
+    background_tasks: BackgroundTasks,
     mem0=Depends(get_mem0),
     _api_key: Optional[str] = Depends(verify_api_key),
 ):
@@ -826,6 +881,12 @@ async def search_recall(
             "RECALL user=%s query='%s' run_id=%s elapsed=%.2fs hits=%d",
             req.user_id, req.query[:50], req.run_id, elapsed, len(results),
         )
+        background_tasks.add_task(
+            log_request, "RECALL", req.user_id, req.run_id,
+            int(elapsed * 1000), 200, len(results) > 0,
+            {"hits": len(results), "has_run_id": bool(req.run_id), "rerank": req.rerank},
+            {"query": req.query, "user_id": req.user_id, "run_id": req.run_id},
+        )
         return {"results": results, "elapsed_seconds": round(elapsed, 2)}
     except Exception as e:
         logger.exception("Error in search_recall:")
@@ -897,6 +958,148 @@ async def reset_memory(mem0=Depends(get_mem0), _api_key: Optional[str] = Depends
         return {"message": "All memories reset"}
     except Exception as e:
         logger.exception("Error in reset_memory:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Request log endpoints ---
+@app.get("/requests/daily-stats", summary="Daily request statistics")
+async def get_daily_stats(
+    days: int = Query(default=30, ge=1, le=365),
+    request_type: Optional[str] = Query(default=None),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Daily request counts for dashboard charts."""
+    try:
+        params: list = [days, days]
+        type_filter = ""
+        if request_type and request_type.upper() != "ALL":
+            type_filter = "AND request_type = %s"
+            params.append(request_type.upper())
+
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT
+                            d::date as date,
+                            COALESCE(r.total, 0) as total,
+                            COALESCE(r.add_count, 0) as add_count,
+                            COALESCE(r.search_count, 0) as search_count,
+                            COALESCE(r.recall_count, 0) as recall_count
+                        FROM generate_series(
+                            (NOW() - make_interval(days => %s))::date,
+                            NOW()::date,
+                            '1 day'::interval
+                        ) d
+                        LEFT JOIN (
+                            SELECT
+                                DATE(created_at) as date,
+                                COUNT(*) as total,
+                                COUNT(*) FILTER (WHERE request_type = 'ADD') as add_count,
+                                COUNT(*) FILTER (WHERE request_type = 'SEARCH') as search_count,
+                                COUNT(*) FILTER (WHERE request_type = 'RECALL') as recall_count
+                            FROM api_requests
+                            WHERE created_at >= NOW() - make_interval(days => %s)
+                            {type_filter}
+                            GROUP BY DATE(created_at)
+                        ) r ON d::date = r.date
+                        ORDER BY d
+                    """, params)
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_query)
+        stats = [
+            {"date": str(r[0]), "total": r[1], "add": r[2], "search": r[3], "recall": r[4]}
+            for r in rows
+        ]
+        return {"days": days, "stats": stats}
+    except Exception as e:
+        logger.exception("Error in get_daily_stats:")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/requests/{request_id}", summary="Get request detail")
+async def get_request_detail(request_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
+    """Retrieve a specific API request log entry."""
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, request_type, user_id, run_id, latency_ms, status_code,
+                               has_results, event_summary, req_payload, memory_actions,
+                               retrieved_memories, error_msg, created_at
+                        FROM api_requests WHERE id = %s
+                    """, (request_id,))
+                    return cur.fetchone()
+
+        row = await asyncio.to_thread(_query)
+        if not row:
+            raise HTTPException(status_code=404, detail="Request not found")
+        return {
+            "id": str(row[0]), "request_type": row[1], "user_id": row[2], "run_id": row[3],
+            "latency_ms": row[4], "status_code": row[5], "has_results": row[6],
+            "event_summary": row[7], "req_payload": row[8], "memory_actions": row[9],
+            "retrieved_memories": row[10], "error_msg": row[11], "created_at": str(row[12]),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in get_request_detail:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/requests", summary="List API request logs")
+async def list_requests(
+    request_type: Optional[str] = None,
+    has_results: Optional[bool] = None,
+    user_id: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """List API request log entries with optional filters."""
+    try:
+        conds = []
+        params: list = []
+        if request_type:
+            conds.append("request_type = %s")
+            params.append(request_type)
+        if has_results is not None:
+            conds.append("has_results = %s")
+            params.append(has_results)
+        if user_id:
+            conds.append("user_id = %s")
+            params.append(user_id)
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT id, request_type, user_id, run_id, latency_ms, status_code,
+                               has_results, event_summary, req_payload, created_at
+                        FROM api_requests {where}
+                        ORDER BY created_at DESC
+                        LIMIT %s OFFSET %s
+                    """, params + [limit, offset])
+                    rows = cur.fetchall()
+                    cur.execute(f"SELECT COUNT(*) FROM api_requests {where}", params)
+                    total = cur.fetchone()[0]
+                    return rows, total
+
+        rows, total = await asyncio.to_thread(_query)
+        items = [
+            {
+                "id": str(r[0]), "request_type": r[1], "user_id": r[2], "run_id": r[3],
+                "latency_ms": r[4], "status_code": r[5], "has_results": r[6],
+                "event_summary": r[7], "req_payload": r[8], "created_at": str(r[9]),
+            }
+            for r in rows
+        ]
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        logger.exception("Error in list_requests:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
