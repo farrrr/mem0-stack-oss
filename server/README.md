@@ -1,17 +1,32 @@
-# Mem0 REST API Server
+# mem0-stack-oss server
 
-Mem0 provides a REST API server (written using FastAPI). Users can perform all operations through REST endpoints. The API also includes OpenAPI documentation, accessible at `/docs` when the server is running.
+The FastAPI application that powers mem0-stack-oss. See the [project README](../README.md) for full documentation.
 
-## Features
+## Quick start
 
-- **Create memories:** Create memories based on messages for a user, agent, or run.
-- **Retrieve memories:** Get all memories for a given user, agent, or run.
-- **Search memories:** Search stored memories based on a query.
-- **Update memories:** Update an existing memory.
-- **Delete memories:** Delete a specific memory or all memories for a user, agent, or run.
-- **Reset memories:** Reset all memories for a user, agent, or run.
-- **OpenAPI Documentation:** Accessible via `/docs` endpoint.
+```bash
+cp .env.example .env
+# Edit .env with your API keys
 
-## Running the server
+# With Docker
+docker compose up
 
-Follow the instructions in the [docs](https://docs.mem0.ai/open-source/features/rest-api) to run the server.
+# Without Docker
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8090
+```
+
+Visit `http://localhost:8090/docs` for the interactive API explorer.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `main.py` | FastAPI app — all endpoints, classification pipeline, maintenance tools |
+| `.env.example` | Full environment variable reference |
+| `prompts/extraction.txt` | Customizable fact extraction prompt |
+| `prompts/classification.txt` | Customizable classification prompt |
+| `prompts/taxonomy.json` | Classification category definitions |
+| `docker-compose.yaml` | Dev stack (API + PostgreSQL + Neo4j) |
+| `Dockerfile` | Production image |
+| `dev.Dockerfile` | Dev image with hot-reload |
