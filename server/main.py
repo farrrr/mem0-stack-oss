@@ -302,6 +302,63 @@ def _build_config() -> dict:
     return config
 
 
+# --- Memory metadata ---
+def init_memory_metadata(memory_id: str, ttl_days: Optional[int] = None):
+    """Set initial importance_score and last_accessed_at for a new memory."""
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        meta: Dict[str, Any] = {"importance_score": 1.0, "last_accessed_at": now_iso}
+        if ttl_days is not None and ttl_days > 0:
+            from datetime import timedelta
+            meta["expires_at"] = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE memories SET payload = jsonb_set(
+                        COALESCE(payload, '{}'), '{metadata}',
+                        COALESCE(payload->'metadata', '{}') || %s::jsonb
+                    ) WHERE id = %s""",
+                    (json.dumps(meta), memory_id),
+                )
+        logger.info("INIT_META ok for %s", memory_id)
+    except Exception as e:
+        logger.warning("INIT_META failed for %s: %s", memory_id, e)
+
+
+def update_last_accessed(memory_ids: List[str]):
+    """Batch update last_accessed_at for memories hit by a search."""
+    if not memory_ids:
+        return
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        meta_patch = json.dumps({"last_accessed_at": now_iso})
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE memories SET payload = jsonb_set(
+                        COALESCE(payload, '{}'), '{metadata}',
+                        COALESCE(payload->'metadata', '{}') || %s::jsonb
+                    ) WHERE id::text = ANY(%s)""",
+                    (meta_patch, memory_ids),
+                )
+        logger.info("LAST_ACCESS updated for %d memories", len(memory_ids))
+    except Exception as e:
+        logger.warning("LAST_ACCESS update failed: %s", e)
+
+
+def save_memory_source(memory_id: str, messages: list):
+    """Store original conversation messages that produced a memory."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO memory_sources (memory_id, messages) VALUES (%s, %s)",
+                    (memory_id, json.dumps(messages, ensure_ascii=False)),
+                )
+    except Exception as e:
+        logger.warning("Source store failed for %s: %s", memory_id, e)
+
+
 # --- Request logging ---
 def log_request(
     request_type: str, user_id: str, run_id: Optional[str],
@@ -684,17 +741,22 @@ async def add_memory(
     try:
         response = await mem0.add(messages=[m.model_dump() for m in memory_create.messages], **params)
 
-        # Schedule background classification for new/updated memories
-        if CLASSIFY_ENABLED:
-            results = response.get("results", []) if isinstance(response, dict) else []
-            for r in results:
-                if r.get("event") in ("ADD", "UPDATE") and r.get("id"):
+        # Post-processing for new/updated memories
+        add_results = response.get("results", []) if isinstance(response, dict) else []
+        raw_messages = [m.model_dump() for m in memory_create.messages]
+        for r in add_results:
+            if r.get("event") in ("ADD", "UPDATE") and r.get("id"):
+                # Store source conversation
+                background_tasks.add_task(save_memory_source, r["id"], raw_messages)
+                # Initialize metadata (importance_score, last_accessed_at)
+                background_tasks.add_task(init_memory_metadata, r["id"])
+                # Schedule classification
+                if CLASSIFY_ENABLED:
                     memory_text = r.get("memory") or r.get("new_memory") or ""
                     if memory_text:
                         background_tasks.add_task(classify_and_store, r["id"], memory_text)
 
         elapsed_ms = int((time.time() - start) * 1000)
-        add_results = response.get("results", []) if isinstance(response, dict) else []
         background_tasks.add_task(
             log_request, "ADD", memory_create.user_id or "", memory_create.run_id,
             elapsed_ms, 200, len(add_results) > 0,
@@ -891,6 +953,11 @@ async def search_recall(
         # 6. Limit
         results = results[:req.limit]
 
+        # Update last_accessed_at for hit memories
+        hit_ids = [r["id"] for r in results if r.get("id")]
+        if hit_ids:
+            background_tasks.add_task(update_last_accessed, hit_ids)
+
         elapsed = time.time() - start
         logger.info(
             "RECALL user=%s query='%s' run_id=%s elapsed=%.2fs hits=%d",
@@ -930,6 +997,26 @@ async def memory_history(memory_id: str, mem0=Depends(get_mem0), _api_key: Optio
     except Exception as e:
         logger.exception("Error in memory_history:")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/memories/{memory_id}/source", summary="Get memory source conversation")
+async def get_memory_source(memory_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
+    """Retrieve the original conversation messages that produced this memory."""
+    try:
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT messages, created_at FROM memory_sources WHERE memory_id = %s ORDER BY created_at ASC",
+                        (memory_id,),
+                    )
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_query)
+        return {"results": [{"messages": r[0], "created_at": str(r[1])} for r in rows]}
+    except Exception as e:
+        logger.warning("Source fetch failed for %s: %s", memory_id, e)
+        return {"results": []}
 
 
 @app.delete("/memories/{memory_id}", summary="Delete a memory")
