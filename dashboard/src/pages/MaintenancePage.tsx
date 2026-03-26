@@ -10,6 +10,7 @@ import { truncate } from '../lib/utils.ts';
 import Card from '../components/ui/Card.tsx';
 import Badge from '../components/ui/Badge.tsx';
 import Button from '../components/ui/Button.tsx';
+import Modal from '../components/ui/Modal.tsx';
 
 export default function MaintenancePage() {
   const { t } = useTranslation();
@@ -81,10 +82,7 @@ export default function MaintenancePage() {
 
       {/* Key Modal */}
       {showKeyModal && (
-        <Modal onClose={() => setShowKeyModal(false)}>
-          <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
-            {t('maintenance.enter_key')}
-          </h3>
+        <Modal onClose={() => setShowKeyModal(false)} title={t('maintenance.enter_key')}>
           <input
             type="password"
             value={keyInput}
@@ -280,10 +278,7 @@ function DecaySection({ ensureKey }: { ensureKey: () => boolean }) {
       )}
 
       {showConfirm && (
-        <Modal onClose={() => setShowConfirm(false)}>
-          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-            {t('common.confirm')}
-          </h3>
+        <Modal onClose={() => setShowConfirm(false)} title={t('common.confirm')}>
           <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
             {t('maintenance.execute_confirm', { count: previewResults?.length ?? 0 })}
           </p>
@@ -484,10 +479,7 @@ function DedupSection({ ensureKey }: { ensureKey: () => boolean }) {
       )}
 
       {showConfirm && (
-        <Modal onClose={() => setShowConfirm(false)}>
-          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-            {t('common.confirm')}
-          </h3>
+        <Modal onClose={() => setShowConfirm(false)} title={t('common.confirm')}>
           <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
             {t('maintenance.execute_confirm', { count: previewResults?.length ?? 0 })}
           </p>
@@ -682,10 +674,7 @@ function CleanupSection({ ensureKey }: { ensureKey: () => boolean }) {
       )}
 
       {showConfirm && (
-        <Modal onClose={() => setShowConfirm(false)}>
-          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-            {t('common.confirm')}
-          </h3>
+        <Modal onClose={() => setShowConfirm(false)} title={t('common.confirm')}>
           <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
             {t('maintenance.execute_confirm', { count: previewResults?.length ?? 0 })}
           </p>
@@ -709,27 +698,6 @@ function CleanupSection({ ensureKey }: { ensureKey: () => boolean }) {
 }
 
 /* ====== Shared UI Helpers ====== */
-
-function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <>
-      <div
-        className="fixed inset-0 z-40"
-        style={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
-        onClick={onClose}
-      />
-      <div
-        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[400px] rounded-xl p-5"
-        style={{
-          backgroundColor: 'var(--color-bg-secondary)',
-          border: '1px solid var(--color-border)',
-        }}
-      >
-        {children}
-      </div>
-    </>
-  );
-}
 
 function ResultTable({ children }: { children: React.ReactNode }) {
   return (

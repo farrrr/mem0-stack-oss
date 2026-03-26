@@ -16,6 +16,8 @@
   --color-warning: #f59f00;
   --color-danger: #f03e3e;
   --color-info: #1c7ed6;
+  --color-purple: #7c3aed;
+  --color-orange: #ea580c;
 
   color-scheme: light dark;
 }
@@ -36,6 +38,8 @@
   --color-warning: #e0af68;
   --color-danger: #f7768e;
   --color-info: #73daca;
+  --color-purple: #bb9af7;
+  --color-orange: #ff9e64;
 }
 
 body {

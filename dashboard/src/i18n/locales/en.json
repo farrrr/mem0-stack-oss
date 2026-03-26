@@ -39,6 +39,7 @@
     "delete_confirm": "Are you sure you want to delete this memory?",
     "bulk_delete_confirm": "Are you sure you want to delete {{count}} memories?",
     "bulk_reclassify_confirm": "Reclassify {{count}} memories?",
+    "bulk_partial_failure": "{{failed}} of {{total}} operations failed",
     "reclassify": "Reclassify",
     "reclassify_all": "Reclassify All",
     "bulk_delete": "Delete Selected",

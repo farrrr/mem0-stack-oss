@@ -10,9 +10,9 @@ const colorMap: Record<BadgeColor, { bg: string; fg: string }> = {
   green: { bg: 'var(--color-success)', fg: '#fff' },
   red: { bg: 'var(--color-danger)', fg: '#fff' },
   yellow: { bg: 'var(--color-warning)', fg: '#1a1b26' },
-  purple: { bg: '#9d7cd8', fg: '#fff' },
+  purple: { bg: 'var(--color-purple)', fg: '#fff' },
   cyan: { bg: 'var(--color-info)', fg: '#fff' },
-  orange: { bg: '#ff9e64', fg: '#1a1b26' },
+  orange: { bg: 'var(--color-orange)', fg: '#1a1b26' },
 };
 
 export default function Badge({ label, color }: BadgeProps) {

@@ -7,29 +7,10 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useDebounce } from '../hooks/useDebounce';
+import type { Memory } from '../lib/types';
 import Button from '../components/ui/Button';
 import MemoryDetailSidebar from '../components/memory/MemoryDetailSidebar';
 import MemoryTimelineView from '../components/memory/MemoryTimelineView';
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-interface Memory {
-  id: string;
-  memory: string;
-  category?: string;
-  subcategory?: string;
-  tags?: string[];
-  confidence?: string;
-  importance_score?: number;
-  classified_by?: string;
-  user_id?: string;
-  agent_id?: string;
-  run_id?: string;
-  created_at?: string;
-  updated_at?: string;
-  [key: string]: unknown;
-}
 
 const LIMIT = 35;
 const DATE_RANGE_OPTIONS = ['all', '1d', '7d', '30d'] as const;
@@ -117,12 +98,10 @@ export default function MemoriesPage() {
   }, []);
 
   const toggleSelectAll = useCallback(() => {
-    if (selected.size === memories.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(memories.map((m) => m.id)));
-    }
-  }, [memories, selected.size]);
+    setSelected((prev) =>
+      prev.size === memories.length ? new Set() : new Set(memories.map((m) => m.id))
+    );
+  }, [memories]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
@@ -132,9 +111,15 @@ export default function MemoriesPage() {
     setBulkLoading(true);
     try {
       const ids = Array.from(selected);
-      await Promise.all(ids.map((id) => api.reclassify(id)));
+      const results = await Promise.allSettled(ids.map((id) => api.reclassify(id)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0) {
+        alert(t('memories.bulk_partial_failure', { failed, total: ids.length }));
+      }
       clearSelection();
       queryClient.invalidateQueries({ queryKey: ['memories'] });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBulkLoading(false);
     }
@@ -145,9 +130,15 @@ export default function MemoriesPage() {
     setBulkLoading(true);
     try {
       const ids = Array.from(selected);
-      await Promise.all(ids.map((id) => api.deleteMemory(id)));
+      const results = await Promise.allSettled(ids.map((id) => api.deleteMemory(id)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0) {
+        alert(t('memories.bulk_partial_failure', { failed, total: ids.length }));
+      }
       clearSelection();
       queryClient.invalidateQueries({ queryKey: ['memories'] });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setBulkLoading(false);
     }

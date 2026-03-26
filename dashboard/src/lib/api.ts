@@ -68,10 +68,11 @@ export const api = {
   getMemoryHistory: (id: string) => request<{ results: unknown[] }>(`/memories/${id}/history`),
 
   // Search
-  search: (query: string, userId: string, limit = 10) =>
+  search: (query: string, userId: string, limit = 10, signal?: AbortSignal) =>
     request('/search', {
       method: 'POST',
       body: JSON.stringify({ query, user_id: userId, limit }),
+      signal,
     }),
   recall: (query: string, userId: string, options: Record<string, unknown> = {}) =>
     request('/search/recall', {

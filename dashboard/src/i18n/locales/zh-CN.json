@@ -39,6 +39,7 @@
     "delete_confirm": "确定要删除这条记忆吗？",
     "bulk_delete_confirm": "确定要删除 {{count}} 条记忆吗？",
     "bulk_reclassify_confirm": "重新分类 {{count}} 条记忆？",
+    "bulk_partial_failure": "{{total}} 项操作中有 {{failed}} 项失败",
     "reclassify": "重新分类",
     "reclassify_all": "全部重新分类",
     "bulk_delete": "删除选中",

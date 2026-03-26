@@ -94,7 +94,7 @@ export default function Sidebar() {
           onClick={cycleTheme}
           className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left"
           style={{ color: 'var(--color-text-muted)' }}
-          title={`Theme: ${theme}`}
+          title={t(`theme.${theme}`)}
         >
           <ThemeIcon size={16} />
           {t(`theme.${theme}`)}

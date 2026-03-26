@@ -6,24 +6,8 @@ import {
   MessageSquare, User, Bot,
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import type { Memory } from '../../lib/types';
 import Button from '../ui/Button';
-
-interface Memory {
-  id: string;
-  memory: string;
-  category?: string;
-  subcategory?: string;
-  tags?: string[];
-  confidence?: string;
-  importance_score?: number;
-  classified_by?: string;
-  user_id?: string;
-  agent_id?: string;
-  run_id?: string;
-  created_at?: string;
-  updated_at?: string;
-  [key: string]: unknown;
-}
 
 interface SourceMessage {
   role?: string;
@@ -68,9 +52,9 @@ function ConfidenceBadge({ confidence }: { confidence?: string }) {
   if (!confidence) return null;
 
   const colorMap: Record<string, { bg: string; text: string }> = {
-    high: { bg: 'var(--color-success)', text: '#fff' },
-    medium: { bg: 'var(--color-warning)', text: '#000' },
-    low: { bg: 'var(--color-danger)', text: '#fff' },
+    high: { bg: 'var(--color-success)', text: 'var(--color-bg-primary)' },
+    medium: { bg: 'var(--color-warning)', text: 'var(--color-text-primary)' },
+    low: { bg: 'var(--color-danger)', text: 'var(--color-bg-primary)' },
   };
   const colors = colorMap[confidence] || { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-primary)' };
   const labelKey = `memories.confidence_${confidence}` as const;

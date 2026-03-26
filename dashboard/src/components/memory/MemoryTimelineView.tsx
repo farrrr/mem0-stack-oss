@@ -1,12 +1,5 @@
 import { useTranslation } from 'react-i18next';
-
-interface Memory {
-  id: string;
-  memory: string;
-  category?: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
+import type { Memory } from '../../lib/types';
 
 interface MemoryTimelineViewProps {
   memories: Memory[];

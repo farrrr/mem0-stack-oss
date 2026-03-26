@@ -381,7 +381,7 @@ function DailyActivityChart({ stats }: { stats: DayStat[] }) {
                   width={barWidth}
                   height={recallH}
                   rx={2}
-                  fill="#9d7cd8"
+                  fill="var(--color-purple)"
                   opacity={0.85}
                 />
               )}
@@ -407,7 +407,7 @@ function DailyActivityChart({ stats }: { stats: DayStat[] }) {
       <div className="flex items-center gap-4 mt-2">
         <LegendItem color="var(--color-success)" label="ADD" />
         <LegendItem color="var(--color-accent)" label="SEARCH" />
-        <LegendItem color="#9d7cd8" label="RECALL" />
+        <LegendItem color="var(--color-purple)" label="RECALL" />
       </div>
 
       {/* Tooltip */}
@@ -426,7 +426,7 @@ function DailyActivityChart({ stats }: { stats: DayStat[] }) {
           <div className="font-semibold mb-1">{tooltip.stat.date}</div>
           <div style={{ color: 'var(--color-success)' }}>ADD: {tooltip.stat.add_count || 0}</div>
           <div style={{ color: 'var(--color-accent)' }}>SEARCH: {tooltip.stat.search_count || 0}</div>
-          <div style={{ color: '#9d7cd8' }}>RECALL: {tooltip.stat.recall_count || 0}</div>
+          <div style={{ color: 'var(--color-purple)' }}>RECALL: {tooltip.stat.recall_count || 0}</div>
         </div>
       )}
     </div>

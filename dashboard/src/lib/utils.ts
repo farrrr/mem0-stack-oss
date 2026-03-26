@@ -1,24 +1,22 @@
 /**
- * Format a date string to a relative time description.
- * e.g. "2 hours ago", "3 days ago", "just now"
+ * Format a date string to a locale-aware relative time description.
+ * Uses Intl.RelativeTimeFormat for proper i18n support.
  */
 export function formatRelativeTime(dateString: string): string {
-  const now = Date.now();
-  const then = new Date(dateString).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-  if (diffSec < 60) return 'just now';
+  const rtf = new Intl.RelativeTimeFormat(navigator.language, { numeric: 'auto' });
+
+  if (diffSec < 60) return rtf.format(-diffSec, 'second');
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 60) return rtf.format(-diffMin, 'minute');
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffHr < 24) return rtf.format(-diffHr, 'hour');
   const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay}d ago`;
-  const diffMonth = Math.floor(diffDay / 30);
-  if (diffMonth < 12) return `${diffMonth}mo ago`;
-  const diffYear = Math.floor(diffMonth / 12);
-  return `${diffYear}y ago`;
+  if (diffDay < 30) return rtf.format(-diffDay, 'day');
+  return formatDate(dateString);
 }
 
 /**

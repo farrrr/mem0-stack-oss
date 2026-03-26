@@ -39,6 +39,7 @@
     "delete_confirm": "確定要刪除這筆記憶嗎？",
     "bulk_delete_confirm": "確定要刪除 {{count}} 筆記憶嗎？",
     "bulk_reclassify_confirm": "重新分類 {{count}} 筆記憶？",
+    "bulk_partial_failure": "{{total}} 項操作中有 {{failed}} 項失敗",
     "reclassify": "重新分類",
     "reclassify_all": "全部重新分類",
     "bulk_delete": "刪除選取",

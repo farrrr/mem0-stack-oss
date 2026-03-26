@@ -2,40 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, AlertCircle } from 'lucide-react';
 import { useDebounce } from '../hooks/useDebounce';
+import { api } from '../lib/api';
+import type { Memory, SearchResult } from '../lib/types';
 import Button from '../components/ui/Button';
 import MemoryDetailSidebar from '../components/memory/MemoryDetailSidebar';
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-interface Memory {
-  id: string;
-  memory: string;
-  category?: string;
-  subcategory?: string;
-  tags?: string[];
-  confidence?: string;
-  importance_score?: number;
-  classified_by?: string;
-  user_id?: string;
-  agent_id?: string;
-  run_id?: string;
-  created_at?: string;
-  updated_at?: string;
-  score?: number;
-  rerank_score?: number;
-  [key: string]: unknown;
-}
-
-interface SearchResult {
-  id: string;
-  memory: string;
-  score?: number;
-  rerank_score?: number;
-  category?: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
 
 const LIMIT_OPTIONS = [5, 10, 25] as const;
 
@@ -111,26 +81,8 @@ export default function SearchPage() {
       setError(null);
 
       try {
-        const res = await fetch('/api/search', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(localStorage.getItem('admin_api_key')
-              ? { 'X-API-Key': localStorage.getItem('admin_api_key')! }
-              : {}),
-          },
-          body: JSON.stringify({ query: debouncedQuery, user_id: userId, limit }),
-          signal: controller.signal,
-        });
-
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail || `API error: ${res.status}`);
-        }
-
-        const data = await res.json();
-        // The search API may return { results: [...] } or directly an array
-        const searchResults = (Array.isArray(data) ? data : data.results || []) as SearchResult[];
+        const data = await api.search(debouncedQuery, userId, limit, controller.signal);
+        const searchResults = (Array.isArray(data) ? data : (data as Record<string, unknown>).results || []) as SearchResult[];
         setResults(searchResults);
         setHasSearched(true);
       } catch (err: unknown) {
