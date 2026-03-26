@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/* Design tokens — light mode (default) */
+:root {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fa;
+  --color-bg-tertiary: #f1f3f5;
+  --color-bg-hover: #e9ecef;
+  --color-text-primary: #1a1b26;
+  --color-text-secondary: #495057;
+  --color-text-muted: #868e96;
+  --color-border: #dee2e6;
+  --color-accent: #4c6ef5;
+  --color-accent-hover: #364fc7;
+  --color-success: #37b24d;
+  --color-warning: #f59f00;
+  --color-danger: #f03e3e;
+  --color-info: #1c7ed6;
+
+  color-scheme: light dark;
+}
+
+/* Design tokens — dark mode (Tokyo Night inspired) */
+.dark {
+  --color-bg-primary: #1a1b26;
+  --color-bg-secondary: #16161e;
+  --color-bg-tertiary: #24283b;
+  --color-bg-hover: #292e42;
+  --color-text-primary: #c0caf5;
+  --color-text-secondary: #9aa5ce;
+  --color-text-muted: #565f89;
+  --color-border: #3b4261;
+  --color-accent: #7aa2f7;
+  --color-accent-hover: #89b4fa;
+  --color-success: #9ece6a;
+  --color-warning: #e0af68;
+  --color-danger: #f7768e;
+  --color-info: #73daca;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100svh;
+}
