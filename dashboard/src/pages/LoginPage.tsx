@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { KeyRound, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +28,7 @@ export default function LoginPage() {
       navigate('/');
     } catch {
       localStorage.removeItem('admin_api_key');
-      setError('Failed to connect. Check your API key and server status.');
+      setError(t('login.error'));
     } finally {
       setLoading(false);
     }
@@ -46,17 +48,17 @@ export default function LoginPage() {
             <KeyRound size={24} />
           </div>
           <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-            mem0 Dashboard
+            {t('login.title')}
           </h1>
           <p className="text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
-            Enter your API key to continue
+            {t('login.subtitle')}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <input
             type="password"
-            placeholder="ADMIN_API_KEY"
+            placeholder={t('login.placeholder')}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             autoFocus
@@ -81,7 +83,7 @@ export default function LoginPage() {
             className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-accent)' }}
           >
-            {loading ? <Loader2 size={16} className="animate-spin mx-auto" /> : 'Connect'}
+            {loading ? <Loader2 size={16} className="animate-spin mx-auto" /> : t('login.connect')}
           </button>
         </form>
       </div>

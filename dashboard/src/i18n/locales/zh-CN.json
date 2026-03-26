@@ -1,0 +1,131 @@
+{
+  "app": {
+    "name": "mem0 控制台"
+  },
+  "nav": {
+    "memories": "记忆",
+    "search": "搜索",
+    "stats": "统计",
+    "requests": "请求",
+    "entities": "实体",
+    "maintenance": "维护",
+    "health": "健康",
+    "logout": "登出"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "系统"
+  },
+  "login": {
+    "title": "mem0 控制台",
+    "subtitle": "输入 API 密钥以继续",
+    "placeholder": "ADMIN_API_KEY",
+    "connect": "连接",
+    "error": "连接失败。请检查 API 密钥和服务器状态。"
+  },
+  "memories": {
+    "title": "记忆",
+    "search_placeholder": "搜索记忆...",
+    "filter_category": "分类",
+    "filter_confidence": "置信度",
+    "no_results": "找不到记忆。",
+    "delete_confirm": "确定要删除这条记忆吗？",
+    "reclassify": "重新分类",
+    "reclassify_all": "全部重新分类",
+    "bulk_delete": "删除选中",
+    "bulk_reclassify": "重新分类选中",
+    "selected": "已选 {{count}} 条",
+    "detail": "记忆详情",
+    "source": "来源",
+    "history": "历史",
+    "feedback": "反馈",
+    "metadata": "元数据",
+    "created_at": "创建时间",
+    "updated_at": "更新时间"
+  },
+  "search": {
+    "title": "搜索",
+    "placeholder": "输入以搜索记忆...",
+    "user_id": "用户 ID",
+    "results": "结果",
+    "no_results": "找不到结果。",
+    "score": "分数",
+    "rerank_score": "重排分数"
+  },
+  "stats": {
+    "title": "统计",
+    "total_memories": "记忆总数",
+    "avg_importance": "平均重要性",
+    "expired": "已过期",
+    "low_importance": "低重要性",
+    "category_distribution": "分类分布",
+    "recent_activity": "近 7 天活动",
+    "add_count": "新增",
+    "search_count": "搜索",
+    "recall_count": "召回"
+  },
+  "requests": {
+    "title": "请求",
+    "daily_activity": "每日活动",
+    "type": "类型",
+    "user": "用户",
+    "latency": "延迟",
+    "status": "状态",
+    "time": "时间",
+    "no_results": "找不到请求。",
+    "detail": "请求详情"
+  },
+  "entities": {
+    "title": "实体",
+    "tab_users": "用户",
+    "tab_agents": "代理",
+    "tab_apps": "应用",
+    "tab_runs": "会话",
+    "memory_count": "记忆数",
+    "agent_count": "代理数",
+    "delete_confirm": "确定吗？这将删除此实体的所有记忆。",
+    "no_results": "找不到实体。"
+  },
+  "maintenance": {
+    "title": "维护",
+    "decay": "衰退",
+    "decay_desc": "根据最后访问时间，对重要性分数应用指数衰退。",
+    "dedup": "去重",
+    "dedup_desc": "根据语义相似度查找并移除近似重复的记忆。",
+    "cleanup": "清理过期",
+    "cleanup_desc": "移除 TTL 过期和低重要性的记忆。",
+    "dry_run": "预览",
+    "execute": "执行",
+    "user_id": "用户 ID",
+    "maintenance_key": "维护 API 密钥",
+    "maintenance_key_required": "此操作需要维护 API 密钥。"
+  },
+  "health": {
+    "title": "健康",
+    "status": "状态",
+    "ok": "健康",
+    "error": "异常",
+    "last_check": "最后检查"
+  },
+  "feedback": {
+    "positive": "正面",
+    "negative": "负面",
+    "very_negative": "非常负面",
+    "submit": "提交反馈",
+    "reason_placeholder": "原因（选填）..."
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "发生错误。",
+    "retry": "重试",
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "close": "关闭",
+    "export": "导出",
+    "language": "语言"
+  }
+}

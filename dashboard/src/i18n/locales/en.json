@@ -1,0 +1,131 @@
+{
+  "app": {
+    "name": "mem0 Dashboard"
+  },
+  "nav": {
+    "memories": "Memories",
+    "search": "Search",
+    "stats": "Stats",
+    "requests": "Requests",
+    "entities": "Entities",
+    "maintenance": "Maintenance",
+    "health": "Health",
+    "logout": "Logout"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "login": {
+    "title": "mem0 Dashboard",
+    "subtitle": "Enter your API key to continue",
+    "placeholder": "ADMIN_API_KEY",
+    "connect": "Connect",
+    "error": "Failed to connect. Check your API key and server status."
+  },
+  "memories": {
+    "title": "Memories",
+    "search_placeholder": "Search memories...",
+    "filter_category": "Category",
+    "filter_confidence": "Confidence",
+    "no_results": "No memories found.",
+    "delete_confirm": "Are you sure you want to delete this memory?",
+    "reclassify": "Reclassify",
+    "reclassify_all": "Reclassify All",
+    "bulk_delete": "Delete Selected",
+    "bulk_reclassify": "Reclassify Selected",
+    "selected": "{{count}} selected",
+    "detail": "Memory Detail",
+    "source": "Source",
+    "history": "History",
+    "feedback": "Feedback",
+    "metadata": "Metadata",
+    "created_at": "Created",
+    "updated_at": "Updated"
+  },
+  "search": {
+    "title": "Search",
+    "placeholder": "Type to search memories...",
+    "user_id": "User ID",
+    "results": "Results",
+    "no_results": "No results found.",
+    "score": "Score",
+    "rerank_score": "Rerank Score"
+  },
+  "stats": {
+    "title": "Statistics",
+    "total_memories": "Total Memories",
+    "avg_importance": "Avg. Importance",
+    "expired": "Expired",
+    "low_importance": "Low Importance",
+    "category_distribution": "Category Distribution",
+    "recent_activity": "Recent Activity (7 days)",
+    "add_count": "Add",
+    "search_count": "Search",
+    "recall_count": "Recall"
+  },
+  "requests": {
+    "title": "Requests",
+    "daily_activity": "Daily Activity",
+    "type": "Type",
+    "user": "User",
+    "latency": "Latency",
+    "status": "Status",
+    "time": "Time",
+    "no_results": "No requests found.",
+    "detail": "Request Detail"
+  },
+  "entities": {
+    "title": "Entities",
+    "tab_users": "Users",
+    "tab_agents": "Agents",
+    "tab_apps": "Apps",
+    "tab_runs": "Runs",
+    "memory_count": "Memories",
+    "agent_count": "Agents",
+    "delete_confirm": "Are you sure? This will delete all memories for this entity.",
+    "no_results": "No entities found."
+  },
+  "maintenance": {
+    "title": "Maintenance",
+    "decay": "Decay",
+    "decay_desc": "Apply exponential decay to importance scores based on last access time.",
+    "dedup": "Deduplication",
+    "dedup_desc": "Find and remove near-duplicate memories based on semantic similarity.",
+    "cleanup": "Cleanup Expired",
+    "cleanup_desc": "Remove TTL-expired and low-importance memories.",
+    "dry_run": "Preview",
+    "execute": "Execute",
+    "user_id": "User ID",
+    "maintenance_key": "Maintenance API Key",
+    "maintenance_key_required": "Maintenance API key is required for this operation."
+  },
+  "health": {
+    "title": "Health",
+    "status": "Status",
+    "ok": "Healthy",
+    "error": "Unhealthy",
+    "last_check": "Last checked"
+  },
+  "feedback": {
+    "positive": "Positive",
+    "negative": "Negative",
+    "very_negative": "Very Negative",
+    "submit": "Submit Feedback",
+    "reason_placeholder": "Reason (optional)..."
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred.",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "export": "Export",
+    "language": "Language"
+  }
+}
