@@ -49,9 +49,10 @@ export const api = {
   health: () => request<{ status: string }>('/health'),
 
   // Memories
-  getMemories: (params: Record<string, string | number>) => {
-    const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
-    return request<{ memories: unknown[]; total: number }>(`/memories?${qs}`);
+  getMemories: (params: Record<string, string | number | undefined>) => {
+    const filtered = Object.entries(params).filter(([, v]) => v !== undefined && v !== '');
+    const qs = new URLSearchParams(filtered.map(([k, v]) => [k, String(v)])).toString();
+    return request<{ memories: unknown[]; total: number; limit: number; offset: number }>(`/memories?${qs}`);
   },
   getMemory: (id: string) => request<Record<string, unknown>>(`/memories/${id}`),
   deleteMemory: (id: string) => request(`/memories/${id}`, { method: 'DELETE' }),
