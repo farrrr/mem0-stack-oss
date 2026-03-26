@@ -48,23 +48,111 @@ POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
 POSTGRES_COLLECTION_NAME = os.environ.get("POSTGRES_COLLECTION_NAME", "memories")
 
+# --- Graph store ---
+GRAPH_PROVIDER = os.environ.get("GRAPH_PROVIDER", "falkordb")
+FALKORDB_HOST = os.environ.get("FALKORDB_HOST", "localhost")
+FALKORDB_PORT = int(os.environ.get("FALKORDB_PORT", "6379"))
+FALKORDB_DATABASE = os.environ.get("FALKORDB_DATABASE", "mem0")
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
 NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "mem0graph")
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# --- LLM ---
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4.1-nano-2025-04-14")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
+LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
+
+# --- Embedder ---
+EMBEDDER_PROVIDER = os.environ.get("EMBEDDER_PROVIDER", "openai")
+EMBEDDER_MODEL = os.environ.get("EMBEDDER_MODEL", "text-embedding-3-small")
+EMBEDDER_DIMS = int(os.environ.get("EMBEDDER_DIMS", "1536"))
+EMBEDDER_API_KEY = os.environ.get("EMBEDDER_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+
+# --- Reranker (optional) ---
+RERANKER_PROVIDER = os.environ.get("RERANKER_PROVIDER", "")
+RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_DEVICE = os.environ.get("RERANKER_DEVICE", "cpu")
+RERANKER_TOP_K = int(os.environ.get("RERANKER_TOP_K", "5"))
+
+# --- Graph LLM (optional, falls back to main LLM) ---
+GRAPH_LLM_PROVIDER = os.environ.get("GRAPH_LLM_PROVIDER", LLM_PROVIDER)
+GRAPH_LLM_MODEL = os.environ.get("GRAPH_LLM_MODEL", LLM_MODEL)
+GRAPH_LLM_API_KEY = os.environ.get("GRAPH_LLM_API_KEY", LLM_API_KEY)
+GRAPH_LLM_BASE_URL = os.environ.get("GRAPH_LLM_BASE_URL", LLM_BASE_URL)
+
+# --- Fallback LLM (optional) ---
+FALLBACK_LLM_MODEL = os.environ.get("FALLBACK_LLM_MODEL", "")
+FALLBACK_LLM_API_KEY = os.environ.get("FALLBACK_LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 
-if not OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY not set - LLM and embedding calls will fail.")
+if not LLM_API_KEY:
+    logger.warning("LLM_API_KEY (or OPENAI_API_KEY) not set - LLM calls will fail.")
+if not EMBEDDER_API_KEY:
+    logger.warning("EMBEDDER_API_KEY (or OPENAI_API_KEY) not set - embedding calls will fail.")
 
 PG_POOL_MIN = int(os.environ.get("PG_POOL_MIN", "2"))
 PG_POOL_MAX = int(os.environ.get("PG_POOL_MAX", "80"))
 
 
+def _build_graph_config() -> dict:
+    """Build graph store config based on GRAPH_PROVIDER."""
+    if GRAPH_PROVIDER == "falkordb":
+        config = {
+            "provider": "falkordb",
+            "config": {
+                "host": FALKORDB_HOST,
+                "port": FALKORDB_PORT,
+                "database": FALKORDB_DATABASE,
+            },
+        }
+    else:
+        config = {
+            "provider": "neo4j",
+            "config": {"url": NEO4J_URI, "username": NEO4J_USERNAME, "password": NEO4J_PASSWORD},
+        }
+
+    # Graph-specific LLM
+    llm_config = {
+        "model": GRAPH_LLM_MODEL,
+        "api_key": GRAPH_LLM_API_KEY,
+        "temperature": 0,
+        "max_tokens": 4096,
+    }
+    if GRAPH_LLM_BASE_URL:
+        llm_config["openai_base_url"] = GRAPH_LLM_BASE_URL
+    config["llm"] = {"provider": GRAPH_LLM_PROVIDER, "config": llm_config}
+
+    # Fallback LLM for graph
+    if FALLBACK_LLM_MODEL and FALLBACK_LLM_API_KEY:
+        config["fallback_llm"] = {
+            "provider": "openai",
+            "config": {
+                "model": FALLBACK_LLM_MODEL,
+                "api_key": FALLBACK_LLM_API_KEY,
+                "temperature": 0,
+                "max_tokens": 4096,
+            },
+        }
+
+    return config
+
+
 def _build_config() -> dict:
     """Build mem0 configuration from environment variables."""
-    return {
+    llm_config = {
+        "api_key": LLM_API_KEY,
+        "temperature": LLM_TEMPERATURE,
+        "model": LLM_MODEL,
+        "max_tokens": LLM_MAX_TOKENS,
+    }
+    if LLM_BASE_URL:
+        llm_config["openai_base_url"] = LLM_BASE_URL
+
+    config = {
         "version": "v1.1",
         "vector_store": {
             "provider": "pgvector",
@@ -75,24 +163,48 @@ def _build_config() -> dict:
                 "user": POSTGRES_USER,
                 "password": POSTGRES_PASSWORD,
                 "collection_name": POSTGRES_COLLECTION_NAME,
+                "embedding_model_dims": EMBEDDER_DIMS,
                 "minconn": PG_POOL_MIN,
                 "maxconn": PG_POOL_MAX,
             },
         },
-        "graph_store": {
-            "provider": "neo4j",
-            "config": {"url": NEO4J_URI, "username": NEO4J_USERNAME, "password": NEO4J_PASSWORD},
-        },
-        "llm": {
-            "provider": "openai",
-            "config": {"api_key": OPENAI_API_KEY, "temperature": 0.2, "model": "gpt-4.1-nano-2025-04-14"},
-        },
+        "graph_store": _build_graph_config(),
+        "llm": {"provider": LLM_PROVIDER, "config": llm_config},
         "embedder": {
-            "provider": "openai",
-            "config": {"api_key": OPENAI_API_KEY, "model": "text-embedding-3-small"},
+            "provider": EMBEDDER_PROVIDER,
+            "config": {
+                "model": EMBEDDER_MODEL,
+                "embedding_dims": EMBEDDER_DIMS,
+                "api_key": EMBEDDER_API_KEY,
+            },
         },
         "history_db_path": HISTORY_DB_PATH,
     }
+
+    # Reranker (optional)
+    if RERANKER_PROVIDER:
+        config["reranker"] = {
+            "provider": RERANKER_PROVIDER,
+            "config": {
+                "model": RERANKER_MODEL,
+                "device": RERANKER_DEVICE,
+                "top_k": RERANKER_TOP_K,
+            },
+        }
+
+    # Top-level fallback LLM
+    if FALLBACK_LLM_MODEL and FALLBACK_LLM_API_KEY:
+        config["fallback_llm"] = {
+            "provider": "openai",
+            "config": {
+                "model": FALLBACK_LLM_MODEL,
+                "api_key": FALLBACK_LLM_API_KEY,
+                "temperature": 0,
+                "max_tokens": 4096,
+            },
+        }
+
+    return config
 
 
 # --- Lifespan ---
