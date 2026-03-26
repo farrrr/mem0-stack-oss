@@ -6,15 +6,19 @@ Changes from upstream:
 - Module-level init → FastAPI lifespan (clean startup/shutdown)
 - Added /health endpoint
 """
+import asyncio
+import json
 import logging
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import psycopg2
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -111,6 +115,58 @@ if os.path.exists(CUSTOM_PROMPT_PATH):
     logger.info("Custom extraction prompt loaded from %s", CUSTOM_PROMPT_PATH)
 elif _is_custom_prompt_path:
     logger.warning("CUSTOM_PROMPT_PATH set to %s but file not found", CUSTOM_PROMPT_PATH)
+
+# --- Classification pipeline config ---
+CLASSIFY_ENABLED = os.environ.get("CLASSIFY_ENABLED", "true").lower() == "true"
+CLASSIFY_MODEL = os.environ.get("CLASSIFY_MODEL", LLM_MODEL)
+CLASSIFY_API_KEY = os.environ.get("CLASSIFY_API_KEY", LLM_API_KEY)
+CLASSIFY_BASE_URL = os.environ.get("CLASSIFY_BASE_URL", LLM_BASE_URL)
+
+VERIFY_ENABLED = os.environ.get("VERIFY_ENABLED", "false").lower() == "true"
+VERIFY_MODEL = os.environ.get("VERIFY_MODEL", "")
+VERIFY_API_KEY = os.environ.get("VERIFY_API_KEY", "")
+VERIFY_PROVIDER = os.environ.get("VERIFY_PROVIDER", "openai")
+
+# Load taxonomy and classification prompt
+_TAXONOMY_PATH = os.path.join(os.path.dirname(__file__), "prompts", "taxonomy.json")
+_CLASSIFY_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "classification.txt")
+_TAXONOMY = {}
+_TAXONOMY_PROMPT = ""
+_CLASSIFY_PROMPT_TEMPLATE = ""
+
+if os.path.exists(_TAXONOMY_PATH):
+    with open(_TAXONOMY_PATH) as _f:
+        _TAXONOMY = json.load(_f)
+
+    # Build flat prompt string for LLM
+    lines = ["OFFICIAL CATEGORIES (pick exactly one):"]
+    lines.append(", ".join(_TAXONOMY.get("categories", [])))
+    lines.append("")
+    lines.append("SUBCATEGORIES per category (key: description):")
+    for cat, subs in _TAXONOMY.get("subcategories", {}).items():
+        if subs:
+            sub_str = ", ".join(f"{k} ({v})" for k, v in subs.items())
+            lines.append(f"  {cat}: {sub_str}")
+    _TAXONOMY_PROMPT = "\n".join(lines)
+
+if os.path.exists(_CLASSIFY_PROMPT_PATH):
+    with open(_CLASSIFY_PROMPT_PATH) as _f:
+        _CLASSIFY_PROMPT_TEMPLATE = _f.read().strip()
+
+# Lazy singleton for classification LLM client
+_classify_client = None
+
+
+def _get_classify_client():
+    """Lazy singleton for the OpenAI-compatible client used for classification."""
+    global _classify_client
+    if _classify_client is None:
+        from openai import OpenAI
+        kwargs = {"api_key": CLASSIFY_API_KEY}
+        if CLASSIFY_BASE_URL:
+            kwargs["base_url"] = CLASSIFY_BASE_URL
+        _classify_client = OpenAI(**kwargs)
+    return _classify_client
 
 
 # --- Direct PG connection (for metadata operations outside SDK) ---
@@ -244,6 +300,155 @@ def _build_config() -> dict:
     return config
 
 
+# --- Classification pipeline ---
+def _strip_markdown_fences(raw: str) -> str:
+    """Remove markdown code fences from LLM output."""
+    import re
+    return re.sub(r"^```\w*\n?", "", re.sub(r"\n?```\s*$", "", raw)).strip()
+
+
+async def classify_memory(memory_text: str) -> dict:
+    """Classify a single memory using an OpenAI-compatible LLM."""
+    if not CLASSIFY_ENABLED or not _CLASSIFY_PROMPT_TEMPLATE:
+        return {}
+    try:
+        client = _get_classify_client()
+        prompt = _CLASSIFY_PROMPT_TEMPLATE.format(
+            taxonomy=_TAXONOMY_PROMPT,
+            memory_text=memory_text,
+        )
+        response = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: client.chat.completions.create(
+                model=CLASSIFY_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=512,
+            ),
+        )
+        raw = _strip_markdown_fences(response.choices[0].message.content.strip())
+        result = json.loads(raw)
+        result["classified_by"] = CLASSIFY_MODEL
+        logger.info(
+            "CLASSIFY ok: category=%s tags=%s",
+            result.get("category"), result.get("tags"),
+        )
+        return result
+    except Exception as e:
+        logger.warning("CLASSIFY failed: %s", e)
+        return {}
+
+
+async def verify_classification(memory_text: str, classification: dict) -> dict:
+    """Optionally verify classification with a second LLM."""
+    if not VERIFY_ENABLED or not VERIFY_MODEL or not VERIFY_API_KEY:
+        return {}
+    try:
+        if VERIFY_PROVIDER == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=VERIFY_API_KEY)
+            prompt = (
+                f"You are a classification verifier. A memory was classified by another AI model.\n\n"
+                f"Memory: {memory_text}\n\n"
+                f"Classification:\n"
+                f"- Category: {classification.get('category', '')}\n"
+                f"- Subcategory: {classification.get('subcategory', [])}\n"
+                f"- Tags: {classification.get('tags', [])}\n\n"
+                f"Rate the classification confidence:\n"
+                f"- high: category is clearly correct, subcategory fits well, tags are relevant\n"
+                f"- medium: category is right but subcategory is debatable\n"
+                f"- low: category seems wrong\n\n"
+                f'Return ONLY valid JSON: {{"confidence": "high"|"medium"|"low", "reasoning": "..."}}'
+            )
+            response = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: client.messages.create(
+                    model=VERIFY_MODEL,
+                    max_tokens=128,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+            )
+            raw = _strip_markdown_fences(response.content[0].text.strip())
+        else:
+            from openai import OpenAI
+            client = OpenAI(api_key=VERIFY_API_KEY)
+            prompt = (
+                f"Verify this memory classification. Memory: {memory_text}\n"
+                f"Category: {classification.get('category')}, Tags: {classification.get('tags')}\n"
+                f'Return JSON: {{"confidence": "high"|"medium"|"low", "reasoning": "..."}}'
+            )
+            response = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model=VERIFY_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0,
+                    max_tokens=128,
+                ),
+            )
+            raw = _strip_markdown_fences(response.choices[0].message.content.strip())
+
+        result = json.loads(raw)
+        result["verified_by"] = f"{VERIFY_PROVIDER}/{VERIFY_MODEL}"
+        logger.info("VERIFY ok: confidence=%s", result.get("confidence"))
+        return result
+    except Exception as e:
+        logger.warning("VERIFY failed: %s", e)
+        return {}
+
+
+def store_classification(memory_id: str, classification: dict):
+    """Write classification result into payload.metadata in PostgreSQL."""
+    if not classification:
+        return
+    try:
+        meta = {
+            "category": classification.get("category"),
+            "subcategory": classification.get("subcategory"),
+            "tags": classification.get("tags", []),
+            "confidence": classification.get("confidence"),
+            "classified_by": classification.get("classified_by"),
+            "verified_by": classification.get("verified_by"),
+            "classified_at": datetime.now(timezone.utc).isoformat(),
+        }
+        meta = {k: v for k, v in meta.items() if v is not None}
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE memories
+                    SET payload = jsonb_set(
+                        COALESCE(payload, '{}'),
+                        '{metadata}',
+                        COALESCE(payload->'metadata', '{}') || %s::jsonb
+                    )
+                    WHERE id = %s
+                    """,
+                    (json.dumps(meta, ensure_ascii=False), memory_id),
+                )
+        logger.info("CLASSIFY stored for %s", memory_id)
+    except Exception as e:
+        logger.warning("CLASSIFY store failed for %s: %s", memory_id, e)
+
+
+async def classify_and_store(memory_id: str, memory_text: str):
+    """Background task: classify, optionally verify, then store."""
+    try:
+        classification = await classify_memory(memory_text)
+        if not classification:
+            return
+        if VERIFY_ENABLED:
+            verification = await verify_classification(memory_text, classification)
+            if verification:
+                classification["confidence"] = verification.get("confidence", classification.get("confidence"))
+                classification["verified_by"] = verification.get("verified_by")
+        store_classification(memory_id, classification)
+    except Exception as e:
+        logger.error("classify_and_store error for %s: %s", memory_id, e)
+
+
 # --- Lifespan ---
 mem0_instance = None
 
@@ -305,6 +510,11 @@ async def lifespan(app: FastAPI):
                     ON memory_feedback(user_id);
             """)
     logger.info("Extension tables ready.")
+
+    # Pre-initialize classification client to avoid thread-safety issues
+    if CLASSIFY_ENABLED and CLASSIFY_API_KEY:
+        _get_classify_client()
+        logger.info("Classification client ready (model=%s).", CLASSIFY_MODEL)
 
     yield
     logger.info("Shutting down.")
@@ -406,16 +616,27 @@ async def set_config(config: Dict[str, Any], _api_key: Optional[str] = Depends(v
 @app.post("/memories", summary="Create memories")
 async def add_memory(
     memory_create: MemoryCreate,
+    background_tasks: BackgroundTasks,
     mem0=Depends(get_mem0),
     _api_key: Optional[str] = Depends(verify_api_key),
 ):
-    """Store new memories."""
+    """Store new memories. Triggers background classification if enabled."""
     if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
         raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
 
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
     try:
         response = await mem0.add(messages=[m.model_dump() for m in memory_create.messages], **params)
+
+        # Schedule background classification for new/updated memories
+        if CLASSIFY_ENABLED:
+            results = response.get("results", []) if isinstance(response, dict) else []
+            for r in results:
+                if r.get("event") in ("ADD", "UPDATE") and r.get("id"):
+                    memory_text = r.get("memory") or r.get("new_memory") or ""
+                    if memory_text:
+                        background_tasks.add_task(classify_and_store, r["id"], memory_text)
+
         return JSONResponse(content=response)
     except Exception as e:
         logger.exception("Error in add_memory:")
@@ -529,6 +750,64 @@ async def reset_memory(mem0=Depends(get_mem0), _api_key: Optional[str] = Depends
         return {"message": "All memories reset"}
     except Exception as e:
         logger.exception("Error in reset_memory:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Classification endpoints ---
+@app.get("/taxonomy", summary="Get classification taxonomy")
+async def get_taxonomy(_api_key: Optional[str] = Depends(verify_api_key)):
+    """Return the current classification taxonomy."""
+    return _TAXONOMY
+
+
+@app.post("/memories/{memory_id}/reclassify", summary="Reclassify a memory")
+async def reclassify_memory(
+    memory_id: str,
+    background_tasks: BackgroundTasks,
+    mem0=Depends(get_mem0),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Trigger re-classification for an existing memory."""
+    try:
+        result = await mem0.get(memory_id)
+        memory_text = ""
+        if isinstance(result, dict):
+            memory_text = result.get("memory") or result.get("data") or ""
+        elif isinstance(result, list) and result:
+            memory_text = result[0].get("memory") or result[0].get("data") or ""
+        if not memory_text:
+            raise HTTPException(status_code=404, detail="Memory text not found")
+        background_tasks.add_task(classify_and_store, memory_id, memory_text)
+        return {"status": "queued", "memory_id": memory_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/reclassify-all", summary="Reclassify all memories for a user")
+async def reclassify_all(
+    background_tasks: BackgroundTasks,
+    user_id: str = Query(..., description="User ID to reclassify memories for"),
+    only_unclassified: bool = Query(True, description="Only reclassify memories without a category"),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Bulk re-classify memories. Defaults to only unclassified ones."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                sql = "SELECT id, COALESCE(payload->>'data', payload->>'memory') FROM memories WHERE payload->>'user_id' = %s"
+                if only_unclassified:
+                    sql += " AND (payload->'metadata'->>'category') IS NULL"
+                cur.execute(sql, (user_id,))
+                rows = cur.fetchall()
+        count = 0
+        for mid, text in rows:
+            if text:
+                background_tasks.add_task(classify_and_store, str(mid), text)
+                count += 1
+        return {"status": "queued", "count": count, "only_unclassified": only_unclassified}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 

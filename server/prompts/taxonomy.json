@@ -1,0 +1,59 @@
+{
+  "categories": [
+    "personal_details",
+    "family",
+    "professional_details",
+    "sports",
+    "travel",
+    "food",
+    "music",
+    "health",
+    "technology",
+    "hobbies",
+    "fashion",
+    "entertainment",
+    "milestones",
+    "user_preferences",
+    "misc"
+  ],
+  "subcategories": {
+    "personal_details": {
+      "identity": "Name, age, location, language",
+      "health": "Personal health information",
+      "finance": "Personal financial details"
+    },
+    "family": {
+      "spouse": "Partner or spouse",
+      "children": "Children",
+      "parents-siblings": "Parents and siblings",
+      "extended": "Extended family"
+    },
+    "professional_details": {
+      "role": "Job title and responsibilities",
+      "company": "Company and organization",
+      "skills": "Professional skills",
+      "projects": "Work projects"
+    },
+    "technology": {
+      "infrastructure": "Servers, hosting, DevOps",
+      "ai-ml": "AI and machine learning",
+      "dev-environment": "Development tools and setup",
+      "networking": "Network configuration"
+    },
+    "hobbies": {
+      "gaming": "Video games",
+      "reading": "Books and reading",
+      "creative": "Creative activities"
+    },
+    "travel": {
+      "destination": "Places visited or planned",
+      "planning": "Travel planning",
+      "trip-notes": "Trip notes and experiences"
+    },
+    "food": {
+      "restaurant": "Restaurants and dining",
+      "recipe": "Recipes and cooking",
+      "preference": "Dietary preferences"
+    }
+  }
+}

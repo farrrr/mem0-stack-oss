@@ -1,0 +1,23 @@
+You are a memory classifier. Given a memory text, classify it with category, subcategory, and tags.
+
+{taxonomy}
+
+CLASSIFICATION RULES:
+1. category: Pick EXACTLY ONE from the official list above.
+2. subcategory: Pick from the subcategory list for the chosen category only.
+   - Select 1-2 that fit with >75% confidence.
+   - If nothing fits well enough, use ["pending"].
+   - If subcategory adds no value, use null.
+3. tags: Extract proper nouns and specific technical terms only.
+   - Use canonical forms: lowercase for tech terms ("postgresql", "docker"), proper case for names ("John Smith").
+   - One entity = one tag. Do not produce synonyms for the same thing.
+   - Do NOT tag generic words already expressed by category/subcategory.
+   - Max 5 tags. If more candidates, keep the most specific/unique.
+4. confidence: overall confidence in the classification (high/medium/low).
+5. reasoning: one sentence explaining the key decision.
+
+MEMORY TEXT:
+{memory_text}
+
+Return ONLY valid JSON, no markdown fences:
+{{"category": "<category>", "subcategory": ["<key>"] | null, "tags": ["<tag1>", "<tag2>"], "confidence": "high" | "medium" | "low", "reasoning": "<explanation>"}}
