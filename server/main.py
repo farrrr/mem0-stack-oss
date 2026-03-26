@@ -599,6 +599,14 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_memory_feedback_uid
                     ON memory_feedback(user_id);
             """)
+            # Expression indexes for efficient pagination/filtering on JSONB fields
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memories_user_created
+                    ON memories ((payload->>'user_id'), ((payload->>'created_at')::timestamptz) DESC NULLS LAST);
+                CREATE INDEX IF NOT EXISTS idx_memories_category
+                    ON memories ((payload->'metadata'->>'category'))
+                    WHERE payload->'metadata'->>'category' IS NOT NULL;
+            """)
     logger.info("Extension tables ready.")
 
     # Pre-initialize classification client to avoid thread-safety issues
@@ -785,6 +793,8 @@ async def get_all_memories(
     _api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Retrieve memories with server-side pagination and filtering."""
+    if not any([user_id, agent_id, run_id]):
+        raise HTTPException(status_code=400, detail="At least one of user_id, agent_id, or run_id is required.")
     start_t = time.time()
     try:
         conds: list[str] = []
@@ -809,8 +819,8 @@ async def get_all_memories(
             conds.append("(payload->>'created_at')::timestamptz >= NOW() - %s::interval")
             params.append(f"{days} days")
         if search:
-            conds.append("COALESCE(payload->>'data', payload->>'memory') ILIKE %s")
-            escaped = search.replace("%", "\\%").replace("_", "\\_")
+            conds.append("COALESCE(payload->>'data', payload->>'memory') ILIKE %s ESCAPE '\\'")
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             params.append(f"%{escaped}%")
 
         where = ("WHERE " + " AND ".join(conds)) if conds else ""
@@ -841,7 +851,7 @@ async def get_all_memories(
             {
                 "id": r[0],
                 "memory": r[1] or "",
-                "metadata": r[2] or {},
+                "metadata": json.loads(r[2]) if isinstance(r[2], str) else (r[2] or {}),
                 "user_id": r[3] or "",
                 "agent_id": r[4] or "",
                 "run_id": r[5] or "",
