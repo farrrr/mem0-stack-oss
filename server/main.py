@@ -9,6 +9,7 @@ Changes from upstream:
 import asyncio
 import json
 import logging
+import math
 import os
 import secrets
 import time
@@ -1364,6 +1365,228 @@ async def delete_entity(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Error in delete_entity:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Maintenance endpoints ---
+@app.post("/maintenance/decay", summary="Decay importance scores",
+          dependencies=[Depends(verify_maintenance_key)])
+async def maintenance_decay(
+    user_id: str = Query(...),
+    decay_lambda: float = Query(0.01, description="Decay rate. 0.01 = ~70 day half-life."),
+    dry_run: bool = Query(True, description="Preview only, don't apply changes."),
+):
+    """Exponential decay on importance_score based on days since last access."""
+    try:
+        decay_sql = """
+            COALESCE((payload->'metadata'->>'importance_score')::float, 1.0)
+            * exp(-%s * GREATEST(
+                EXTRACT(EPOCH FROM (NOW() - COALESCE(
+                    (payload->'metadata'->>'last_accessed_at')::timestamptz,
+                    (payload->>'created_at')::timestamptz,
+                    NOW()
+                ))) / 86400.0, 0
+            ))
+        """
+        where = "payload->>'user_id' = %s AND payload->'metadata'->>'importance_score' IS NOT NULL"
+
+        def _run():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    if dry_run:
+                        cur.execute(f"""
+                            SELECT id::text,
+                                   COALESCE(payload->>'data', payload->>'memory'),
+                                   COALESCE((payload->'metadata'->>'importance_score')::float, 1.0),
+                                   payload->'metadata'->>'last_accessed_at',
+                                   {decay_sql} AS new_score
+                            FROM memories WHERE {where}
+                            ORDER BY 3 DESC
+                        """, (decay_lambda, user_id))
+                        return cur.fetchall(), None
+                    else:
+                        cur.execute(f"""
+                            UPDATE memories SET payload = jsonb_set(
+                                payload, '{{metadata,importance_score}}', to_jsonb({decay_sql})
+                            ) WHERE {where}
+                        """, (decay_lambda, user_id))
+                        return None, cur.rowcount
+
+        rows, affected = await asyncio.to_thread(_run)
+        if dry_run:
+            return {
+                "dry_run": True, "total": len(rows), "decay_lambda": decay_lambda,
+                "memories": [
+                    {"id": r[0], "memory": (r[1] or "")[:100], "current_score": round(r[2], 4),
+                     "last_accessed_at": r[3], "new_score": round(r[4], 4)}
+                    for r in rows
+                ],
+            }
+        logger.info("DECAY applied: %d memories, lambda=%s", affected, decay_lambda)
+        return {"dry_run": False, "affected": affected, "decay_lambda": decay_lambda}
+    except Exception as e:
+        logger.exception("Error in maintenance_decay:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/maintenance/dedup", summary="Semantic deduplication",
+          dependencies=[Depends(verify_maintenance_key)])
+async def maintenance_dedup(
+    user_id: str = Query(...),
+    threshold: float = Query(0.95, description="Cosine similarity threshold for duplicates."),
+    dry_run: bool = Query(True),
+    max_memories: int = Query(1000, ge=1, le=5000),
+    mem0=Depends(get_mem0),
+):
+    """Find and remove near-duplicate memories based on cosine similarity."""
+    try:
+        def _fetch():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id::text, COALESCE(payload->>'data', payload->>'memory'),
+                               embedding,
+                               COALESCE((payload->>'updated_at')::timestamptz,
+                                        (payload->>'created_at')::timestamptz) AS updated_at
+                        FROM memories WHERE payload->>'user_id' = %s
+                        ORDER BY updated_at DESC NULLS LAST LIMIT %s
+                    """, (user_id, max_memories))
+                    return cur.fetchall()
+
+        rows = await asyncio.to_thread(_fetch)
+        if len(rows) < 2:
+            return {"dry_run": dry_run, "total_checked": len(rows), "duplicates_found": 0, "pairs": []}
+
+        # Parse embeddings
+        memories = []
+        for mid, text, emb_raw, updated_at in rows:
+            if emb_raw is None:
+                continue
+            if isinstance(emb_raw, str):
+                emb = [float(x) for x in emb_raw.strip("[]").split(",")]
+            elif isinstance(emb_raw, list):
+                emb = [float(x) for x in emb_raw]
+            else:
+                continue
+            memories.append({"id": mid, "text": text or "", "embedding": emb,
+                             "updated_at": str(updated_at) if updated_at else ""})
+
+        # Pairwise cosine similarity in thread pool
+        def _compute(mems, thresh):
+            def _dot(a, b): return sum(x * y for x, y in zip(a, b))
+            def _norm(a): return math.sqrt(sum(x * x for x in a))
+            norms = [_norm(m["embedding"]) for m in mems]
+            deleted, pairs = set(), []
+            for i in range(len(mems)):
+                if mems[i]["id"] in deleted:
+                    continue
+                for j in range(i + 1, len(mems)):
+                    if mems[j]["id"] in deleted or norms[i] == 0 or norms[j] == 0:
+                        continue
+                    sim = _dot(mems[i]["embedding"], mems[j]["embedding"]) / (norms[i] * norms[j])
+                    if sim >= thresh:
+                        deleted.add(mems[j]["id"])
+                        pairs.append({
+                            "keep": {"id": mems[i]["id"], "text": mems[i]["text"][:100]},
+                            "delete": {"id": mems[j]["id"], "text": mems[j]["text"][:100]},
+                            "similarity": round(sim, 4),
+                        })
+            return deleted, pairs
+
+        to_delete, pairs = await asyncio.to_thread(_compute, memories, threshold)
+
+        deleted_count = 0
+        if not dry_run and to_delete:
+            for mid in to_delete:
+                try:
+                    await mem0.delete(memory_id=mid)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.warning("DEDUP delete failed for %s: %s", mid, e)
+            logger.info("DEDUP completed: %d/%d deleted for user=%s", deleted_count, len(to_delete), user_id)
+
+        return {
+            "dry_run": dry_run, "total_checked": len(memories), "threshold": threshold,
+            "duplicates_found": len(pairs), "to_delete": len(to_delete),
+            "deleted": deleted_count, "pairs": pairs,
+        }
+    except Exception as e:
+        logger.exception("Error in maintenance_dedup:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/maintenance/cleanup-expired", summary="Clean up expired and low-importance memories",
+          dependencies=[Depends(verify_maintenance_key)])
+async def maintenance_cleanup_expired(
+    user_id: str = Query(...),
+    dry_run: bool = Query(True),
+    include_low_importance: bool = Query(True, description="Also delete memories below importance threshold."),
+    importance_threshold: float = Query(0.1, description="Memories below this score are candidates."),
+    mem0=Depends(get_mem0),
+):
+    """Delete TTL-expired memories and optionally low-importance ones."""
+    try:
+        def _fetch():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id::text, COALESCE(payload->>'data', payload->>'memory'),
+                               payload->'metadata'->>'expires_at',
+                               payload->'metadata'->>'importance_score', 'expired' AS reason
+                        FROM memories
+                        WHERE payload->>'user_id' = %s
+                          AND payload->'metadata'->>'expires_at' IS NOT NULL
+                          AND (payload->'metadata'->>'expires_at')::timestamptz < NOW()
+                    """, (user_id,))
+                    expired = cur.fetchall()
+
+                    low = []
+                    if include_low_importance:
+                        cur.execute("""
+                            SELECT id::text, COALESCE(payload->>'data', payload->>'memory'),
+                                   payload->'metadata'->>'expires_at',
+                                   payload->'metadata'->>'importance_score', 'low_importance' AS reason
+                            FROM memories
+                            WHERE payload->>'user_id' = %s
+                              AND payload->'metadata'->>'importance_score' IS NOT NULL
+                              AND (payload->'metadata'->>'importance_score')::float < %s
+                        """, (user_id, importance_threshold))
+                        low = cur.fetchall()
+                    return expired, low
+
+        expired_rows, low_rows = await asyncio.to_thread(_fetch)
+
+        # Merge and deduplicate
+        candidates = {}
+        for row in expired_rows + low_rows:
+            mid = row[0]
+            if mid not in candidates:
+                candidates[mid] = {
+                    "id": mid, "memory": (row[1] or "")[:100], "expires_at": row[2],
+                    "importance_score": float(row[3]) if row[3] else None, "reason": row[4],
+                }
+            else:
+                candidates[mid]["reason"] = "expired+low_importance"
+
+        candidate_list = list(candidates.values())
+        deleted_count = 0
+        if not dry_run and candidate_list:
+            for c in candidate_list:
+                try:
+                    await mem0.delete(memory_id=c["id"])
+                    deleted_count += 1
+                except Exception as e:
+                    logger.warning("CLEANUP delete failed for %s: %s", c["id"], e)
+            logger.info("CLEANUP completed: %d/%d deleted", deleted_count, len(candidate_list))
+
+        return {
+            "dry_run": dry_run, "expired_count": len(expired_rows),
+            "low_importance_count": len(low_rows), "total_candidates": len(candidate_list),
+            "deleted": deleted_count, "importance_threshold": importance_threshold,
+            "candidates": candidate_list,
+        }
+    except Exception as e:
+        logger.exception("Error in maintenance_cleanup:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
