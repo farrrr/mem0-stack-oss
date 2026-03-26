@@ -599,6 +599,14 @@ async def lifespan(app: FastAPI):
                 CREATE INDEX IF NOT EXISTS idx_memory_feedback_uid
                     ON memory_feedback(user_id);
             """)
+            # Expression indexes for efficient pagination/filtering on JSONB fields
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memories_user_created
+                    ON memories ((payload->>'user_id'), ((payload->>'created_at')::timestamptz) DESC NULLS LAST);
+                CREATE INDEX IF NOT EXISTS idx_memories_category
+                    ON memories ((payload->'metadata'->>'category'))
+                    WHERE payload->'metadata'->>'category' IS NOT NULL;
+            """)
     logger.info("Extension tables ready.")
 
     # Pre-initialize classification client to avoid thread-safety issues
@@ -773,19 +781,95 @@ async def add_memory(
 @app.get("/memories", summary="Get memories")
 async def get_all_memories(
     user_id: Optional[str] = None,
-    run_id: Optional[str] = None,
     agent_id: Optional[str] = None,
-    mem0=Depends(get_mem0),
+    run_id: Optional[str] = None,
+    limit: int = Query(35, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    category: Optional[str] = None,
+    confidence: Optional[str] = None,
+    date_range: Optional[str] = Query(None, description="Filter: 1d, 7d, or 30d"),
+    search: Optional[str] = Query(None, description="Text search (ILIKE)"),
+    background_tasks: BackgroundTasks = None,
     _api_key: Optional[str] = Depends(verify_api_key),
 ):
-    """Retrieve stored memories."""
-    if not any([user_id, run_id, agent_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier is required.")
+    """Retrieve memories with server-side pagination and filtering."""
+    if not any([user_id, agent_id, run_id]):
+        raise HTTPException(status_code=400, detail="At least one of user_id, agent_id, or run_id is required.")
+    start_t = time.time()
     try:
-        params = {
-            k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v is not None
-        }
-        return await mem0.get_all(**params)
+        conds: list[str] = []
+        params: list = []
+        if user_id:
+            conds.append("payload->>'user_id' = %s")
+            params.append(user_id)
+        if agent_id:
+            conds.append("payload->>'agent_id' = %s")
+            params.append(agent_id)
+        if run_id:
+            conds.append("payload->>'run_id' = %s")
+            params.append(run_id)
+        if category:
+            conds.append("payload->'metadata'->>'category' = %s")
+            params.append(category)
+        if confidence:
+            conds.append("payload->'metadata'->>'confidence' = %s")
+            params.append(confidence)
+        if date_range in ("1d", "7d", "30d"):
+            days = {"1d": 1, "7d": 7, "30d": 30}[date_range]
+            conds.append("(payload->>'created_at')::timestamptz >= NOW() - %s::interval")
+            params.append(f"{days} days")
+        if search:
+            conds.append("COALESCE(payload->>'data', payload->>'memory') ILIKE %s ESCAPE '\\'")
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.append(f"%{escaped}%")
+
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+        def _query():
+            with get_pg_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT COUNT(*) FROM memories {where}", params)
+                    total = cur.fetchone()[0]
+                    cur.execute(f"""
+                        SELECT id::text,
+                               COALESCE(payload->>'data', payload->>'memory'),
+                               payload->'metadata',
+                               payload->>'user_id',
+                               payload->>'agent_id',
+                               payload->>'run_id',
+                               payload->>'created_at',
+                               payload->>'updated_at'
+                        FROM memories {where}
+                        ORDER BY (payload->>'created_at')::timestamptz DESC NULLS LAST
+                        LIMIT %s OFFSET %s
+                    """, params + [limit, offset])
+                    rows = cur.fetchall()
+                    return total, rows
+
+        total, rows = await asyncio.to_thread(_query)
+        results = [
+            {
+                "id": r[0],
+                "memory": r[1] or "",
+                "metadata": json.loads(r[2]) if isinstance(r[2], str) else (r[2] or {}),
+                "user_id": r[3] or "",
+                "agent_id": r[4] or "",
+                "run_id": r[5] or "",
+                "created_at": r[6] or "",
+                "updated_at": r[7] or "",
+            }
+            for r in rows
+        ]
+
+        elapsed_ms = int((time.time() - start_t) * 1000)
+        if background_tasks:
+            background_tasks.add_task(
+                log_request, "GET_ALL", user_id or "", run_id,
+                elapsed_ms, 200, total > 0,
+                {"total": total, "returned": len(results), "limit": limit, "offset": offset},
+                {"user_id": user_id, "category": category, "search": search},
+            )
+        return {"memories": results, "total": total, "limit": limit, "offset": offset}
     except Exception as e:
         logger.exception("Error in get_all_memories:")
         raise HTTPException(status_code=500, detail=str(e))
