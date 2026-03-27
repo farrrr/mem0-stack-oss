@@ -603,7 +603,7 @@ async def lifespan(app: FastAPI):
             # Note: text sort on ISO 8601 dates gives correct chronological order
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memories_user_created
-                    ON memories ((payload->>'user_id'), (payload->>'created_at') DESC);
+                    ON memories ((payload->>'user_id'), (payload->>'created_at') DESC NULLS LAST);
                 CREATE INDEX IF NOT EXISTS idx_memories_category
                     ON memories ((payload->'metadata'->>'category'))
                     WHERE payload->'metadata'->>'category' IS NOT NULL;
