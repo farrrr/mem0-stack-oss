@@ -11,6 +11,7 @@ A production-ready API server that wraps the mem0 SDK and adds features you need
 - **Memory lifecycle** — importance decay, semantic dedup, TTL expiry, and cleanup
 - **Feedback loop** — users can flag bad memories; `very_negative` auto-suppresses
 - **Full observability** — request logging, source tracking, entity management, statistics
+- **Dashboard** — React-based web UI with i18n (English, 繁體中文, 简体中文)
 
 ## Architecture
 
@@ -23,6 +24,8 @@ mem0-stack-oss (FastAPI + AsyncMemory)
     ├── pgvector (vector search + metadata)
     ├── FalkorDB or Neo4j (graph memory)
     └── Any OpenAI-compatible LLM (fact extraction + classification)
+
+Dashboard (React) ──→ mem0-stack-oss API
 ```
 
 ## Quick start
@@ -30,37 +33,81 @@ mem0-stack-oss (FastAPI + AsyncMemory)
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/farrrr/mem0-stack-oss.git
-cd mem0-stack-oss/server
+git clone https://github.com/farrrr/mem0-stack-oss.git /opt/mem0-stack
+cd /opt/mem0-stack/server
 cp .env.example .env
 # Edit .env with your API keys and database credentials
 ```
 
-### 2. Run with Docker Compose
+### 2a. Run with systemd (recommended for production)
 
 ```bash
+# Create virtual environment
+python3 -m venv /opt/mem0-stack/venv
+/opt/mem0-stack/venv/bin/pip install -r /opt/mem0-stack/server/requirements.txt
+
+# Install systemd service
+mkdir -p ~/.config/systemd/user
+cp /opt/mem0-stack/systemd/mem0-api.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mem0-api
+
+# Verify
+curl -X GET http://localhost:8090/health
+```
+
+Requires PostgreSQL with pgvector and FalkorDB (or Neo4j) running separately.
+
+### 2b. Run with Docker Compose
+
+```bash
+cd /opt/mem0-stack/server
 docker compose up
 ```
 
 The API is available at `http://localhost:8888`. Visit `/docs` for the interactive OpenAPI explorer.
 
-### 3. Run without Docker
+### 2c. Run directly (development)
 
 ```bash
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8090
+cd /opt/mem0-stack/server
+/opt/mem0-stack/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8090 --reload
 ```
 
-Requires PostgreSQL with pgvector and FalkorDB (or Neo4j) running separately.
+### 3. Dashboard (optional)
+
+```bash
+cd /opt/mem0-stack/dashboard
+npm install
+npm run build
+
+# Development with hot-reload
+npm run dev
+```
+
+## Service management
+
+```bash
+# Start / stop / restart
+systemctl --user start mem0-api
+systemctl --user stop mem0-api
+systemctl --user restart mem0-api
+
+# View logs
+journalctl --user -u mem0-api -f
+
+# Check status
+systemctl --user status mem0-api
+```
 
 ## API endpoints
 
-### Core (from upstream mem0)
+### Core
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/memories` | Create memories (triggers background classification) |
-| `GET` | `/memories` | List memories by user/agent/run |
+| `GET` | `/memories` | List memories with server-side pagination and filtering |
 | `GET` | `/memories/{id}` | Get a specific memory |
 | `PUT` | `/memories/{id}` | Update a memory |
 | `DELETE` | `/memories/{id}` | Delete a memory |
@@ -69,6 +116,22 @@ Requires PostgreSQL with pgvector and FalkorDB (or Neo4j) running separately.
 | `POST` | `/configure` | Hot-reload memory configuration |
 | `POST` | `/reset` | Reset all memories |
 | `GET` | `/health` | Health check |
+
+### Memories pagination
+
+`GET /memories` supports server-side pagination and filtering:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `user_id` | string | **Required** (one of user_id/agent_id/run_id) |
+| `agent_id` | string | Filter by agent |
+| `run_id` | string | Filter by session |
+| `limit` | int | Results per page (default 35, max 500) |
+| `offset` | int | Pagination offset |
+| `category` | string | Filter by classification category |
+| `confidence` | string | Filter by confidence (high/medium/low) |
+| `date_range` | string | Filter by time: `1d`, `7d`, or `30d` |
+| `search` | string | Text search (ILIKE) |
 
 ### Classification
 
@@ -161,6 +224,7 @@ The `server/prompts/` directory contains customizable templates:
 | Reranker | None | Optional (HuggingFace) |
 | Classification | None | 3-stage pipeline (classify + verify + store) |
 | Combined search | None | UNION long-term + session + rerank |
+| Pagination | Client-side only | Server-side with filtering |
 | Request logging | None | Full audit trail |
 | Feedback | None | positive/negative/very_negative + auto-suppress |
 | Entities | None | List, filter, delete by type |
@@ -168,6 +232,8 @@ The `server/prompts/` directory contains customizable templates:
 | Statistics | None | Dashboard-ready aggregations |
 | Source tracking | None | Original conversation per memory |
 | Connection pool | Default (5) | Configurable (default 2-80) |
+| Dashboard | None | React + i18n (en/zh-TW/zh-CN) |
+| Deployment | Docker only | systemd + Docker |
 
 ## Project structure
 
@@ -185,6 +251,16 @@ mem0-stack-oss/
 │   ├── dev.Dockerfile
 │   ├── docker-compose.yaml
 │   └── Makefile
+├── dashboard/                  # React web UI
+│   ├── src/
+│   │   ├── pages/              # 7 pages + login
+│   │   ├── components/         # Shared UI components
+│   │   ├── i18n/               # en, zh-TW, zh-CN
+│   │   └── lib/                # API client, types, utils
+│   ├── package.json
+│   └── vite.config.ts
+├── systemd/
+│   └── mem0-api.service        # systemd service template
 └── docs/
     └── features/
         └── rest-api.md
