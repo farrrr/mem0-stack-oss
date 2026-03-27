@@ -600,9 +600,10 @@ async def lifespan(app: FastAPI):
                     ON memory_feedback(user_id);
             """)
             # Expression indexes for efficient pagination/filtering on JSONB fields
+            # Note: text sort on ISO 8601 dates gives correct chronological order
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_memories_user_id
-                    ON memories ((payload->>'user_id'));
+                CREATE INDEX IF NOT EXISTS idx_memories_user_created
+                    ON memories ((payload->>'user_id'), (payload->>'created_at') DESC);
                 CREATE INDEX IF NOT EXISTS idx_memories_category
                     ON memories ((payload->'metadata'->>'category'))
                     WHERE payload->'metadata'->>'category' IS NOT NULL;

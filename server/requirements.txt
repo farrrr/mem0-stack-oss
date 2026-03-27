@@ -1,6 +1,19 @@
 fastapi==0.115.8
 uvicorn==0.34.0
 pydantic==2.10.4
-mem0ai>=0.1.48
 python-dotenv==1.0.1
-psycopg>=3.2.8
+psycopg2-binary>=2.9.9
+mem0ai>=0.1.48
+
+# Graph store
+falkordb>=1.0.0
+
+# Classification verification (optional, only if VERIFY_PROVIDER=anthropic)
+anthropic>=0.50.0
+
+# Reranker (optional, only if RERANKER_PROVIDER=huggingface)
+# transformers>=4.40.0
+# torch>=2.0.0
+
+# FalkorDB BM25 search
+rank-bm25>=0.2.2
