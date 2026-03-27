@@ -1,0 +1,45 @@
+{
+  "name": "@mem0-oss/openclaw-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mem0 memory plugin for OpenClaw - connects to mem0-stack-oss API",
+  "license": "Apache-2.0",
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "memory",
+    "mem0",
+    "long-term-memory"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.47"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.18"
+  }
+}

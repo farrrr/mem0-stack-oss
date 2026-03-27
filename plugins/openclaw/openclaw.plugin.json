@@ -1,0 +1,88 @@
+{
+  "id": "openclaw-mem0",
+  "kind": "memory",
+  "uiHints": {
+    "apiUrl": {
+      "label": "API URL",
+      "placeholder": "http://localhost:8090",
+      "help": "URL of the mem0-stack-oss API server"
+    },
+    "apiKey": {
+      "label": "API Key",
+      "sensitive": true,
+      "placeholder": "your-api-key",
+      "help": "Optional API key for authentication (or use ${MEM0_API_KEY})"
+    },
+    "identity": {
+      "label": "Identity Config",
+      "advanced": true,
+      "help": "User/agent/app identity mapping. defaultUserId, defaultAgentId, appId, userMapping, agentMapping."
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically store conversation context after each agent turn"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories before each agent turn"
+    },
+    "enableGraph": {
+      "label": "Enable Graph Memory",
+      "help": "Enable graph memory for entity relationships"
+    },
+    "customInstructions": {
+      "label": "Custom Instructions",
+      "placeholder": "Only store user preferences and important facts...",
+      "help": "Natural language rules for what Mem0 should store or exclude"
+    },
+    "searchThreshold": {
+      "label": "Search Threshold",
+      "placeholder": "0.3",
+      "help": "Minimum similarity score for search results (0-1)"
+    },
+    "topK": {
+      "label": "Top K Results",
+      "placeholder": "6",
+      "help": "Maximum number of memories to retrieve"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiUrl": {
+        "type": "string"
+      },
+      "apiKey": {
+        "type": "string"
+      },
+      "identity": {
+        "type": "object",
+        "properties": {
+          "defaultUserId": { "type": "string" },
+          "defaultAgentId": { "type": "string" },
+          "appId": { "type": "string" },
+          "userMapping": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "agentMapping": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      },
+      "userId": {
+        "type": "string",
+        "description": "Deprecated: use identity.defaultUserId"
+      },
+      "autoCapture": { "type": "boolean" },
+      "autoRecall": { "type": "boolean" },
+      "enableGraph": { "type": "boolean" },
+      "customInstructions": { "type": "string" },
+      "searchThreshold": { "type": "number" },
+      "topK": { "type": "number" }
+    },
+    "required": []
+  }
+}
