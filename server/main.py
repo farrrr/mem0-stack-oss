@@ -601,8 +601,8 @@ async def lifespan(app: FastAPI):
             """)
             # Expression indexes for efficient pagination/filtering on JSONB fields
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_memories_user_created
-                    ON memories ((payload->>'user_id'), ((payload->>'created_at')::timestamptz) DESC NULLS LAST);
+                CREATE INDEX IF NOT EXISTS idx_memories_user_id
+                    ON memories ((payload->>'user_id'));
                 CREATE INDEX IF NOT EXISTS idx_memories_category
                     ON memories ((payload->'metadata'->>'category'))
                     WHERE payload->'metadata'->>'category' IS NOT NULL;
