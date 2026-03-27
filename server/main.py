@@ -841,7 +841,7 @@ async def get_all_memories(
                                payload->>'created_at',
                                payload->>'updated_at'
                         FROM memories {where}
-                        ORDER BY (payload->>'created_at')::timestamptz DESC NULLS LAST
+                        ORDER BY (payload->>'created_at') DESC NULLS LAST
                         LIMIT %s OFFSET %s
                     """, params + [limit, offset])
                     rows = cur.fetchall()
