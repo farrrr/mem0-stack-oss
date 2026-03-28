@@ -22,7 +22,9 @@
     "subtitle": "输入 API 密钥以继续",
     "placeholder": "ADMIN_API_KEY",
     "connect": "连接",
-    "error": "连接失败。请检查 API 密钥和服务器状态。"
+    "error": "连接失败。请检查 API 密钥和服务器状态。",
+    "checking_server": "正在检查服务器连接...",
+    "key_optional": "若服务器未设置 API 密钥，可留空。"
   },
   "memories": {
     "title": "记忆",

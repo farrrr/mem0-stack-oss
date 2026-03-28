@@ -6,6 +6,7 @@ import {
   RefreshCw, Trash2, X,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { DEFAULT_USER_ID } from '../lib/constants';
 import { useDebounce } from '../hooks/useDebounce';
 import type { Memory } from '../lib/types';
 import Button from '../components/ui/Button';
@@ -37,7 +38,7 @@ export default function MemoriesPage() {
   const queryClient = useQueryClient();
 
   // Filters
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState(DEFAULT_USER_ID);
   const [category, setCategory] = useState('');
   const [confidence, setConfidence] = useState('');
   const [dateRange, setDateRange] = useState<string>('all');

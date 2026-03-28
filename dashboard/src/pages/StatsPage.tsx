@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Brain, Plus, Search as SearchIcon, Star, BarChart3 } from 'lucide-react';
 import { api } from '../lib/api.ts';
+import { DEFAULT_USER_ID } from '../lib/constants.ts';
 import PageHeader from '../components/ui/PageHeader.tsx';
 import StatCard from '../components/ui/StatCard.tsx';
 import Card from '../components/ui/Card.tsx';
@@ -25,8 +26,8 @@ interface StatsData {
 
 export default function StatsPage() {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState('');
-  const [activeUserId, setActiveUserId] = useState('');
+  const [userId, setUserId] = useState(DEFAULT_USER_ID);
+  const [activeUserId, setActiveUserId] = useState(DEFAULT_USER_ID);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['stats', activeUserId],

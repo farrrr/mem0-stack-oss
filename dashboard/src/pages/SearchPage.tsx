@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Search, AlertCircle } from 'lucide-react';
 import { useDebounce } from '../hooks/useDebounce';
 import { api } from '../lib/api';
+import { DEFAULT_USER_ID } from '../lib/constants';
 import type { Memory, SearchResult } from '../lib/types';
 import Button from '../components/ui/Button';
 import MemoryDetailSidebar from '../components/memory/MemoryDetailSidebar';
@@ -46,7 +47,7 @@ export default function SearchPage() {
   const { t } = useTranslation();
 
   const [query, setQuery] = useState('');
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState(DEFAULT_USER_ID);
   const [limit, setLimit] = useState<number>(10);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -81,8 +82,7 @@ export default function SearchPage() {
       setError(null);
 
       try {
-        const data = await api.search(debouncedQuery, userId, limit, controller.signal);
-        const searchResults = (Array.isArray(data) ? data : (data as Record<string, unknown>).results || []) as SearchResult[];
+        const searchResults = await api.search(debouncedQuery, userId, limit, controller.signal);
         setResults(searchResults);
         setHasSearched(true);
       } catch (err: unknown) {

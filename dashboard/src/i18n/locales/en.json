@@ -22,7 +22,9 @@
     "subtitle": "Enter your API key to continue",
     "placeholder": "ADMIN_API_KEY",
     "connect": "Connect",
-    "error": "Failed to connect. Check your API key and server status."
+    "error": "Failed to connect. Check your API key and server status.",
+    "checking_server": "Checking server connection...",
+    "key_optional": "Leave empty if the server has no API key configured."
   },
   "memories": {
     "title": "Memories",

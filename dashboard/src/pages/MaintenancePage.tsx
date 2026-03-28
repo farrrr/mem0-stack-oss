@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { api } from '../lib/api.ts';
+import { DEFAULT_USER_ID } from '../lib/constants.ts';
 import { truncate } from '../lib/utils.ts';
 import Card from '../components/ui/Card.tsx';
 import Badge from '../components/ui/Badge.tsx';
@@ -122,7 +123,7 @@ interface DecayResult {
 
 function DecaySection({ ensureKey }: { ensureKey: () => boolean }) {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState(DEFAULT_USER_ID);
   const [lambda, setLambda] = useState(0.01);
   const [previewResults, setPreviewResults] = useState<DecayResult[] | null>(null);
   const [hasPreviewed, setHasPreviewed] = useState(false);
@@ -313,7 +314,7 @@ interface DedupResult {
 
 function DedupSection({ ensureKey }: { ensureKey: () => boolean }) {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState(DEFAULT_USER_ID);
   const [threshold, setThreshold] = useState(0.95);
   const [previewResults, setPreviewResults] = useState<DedupResult[] | null>(null);
   const [hasPreviewed, setHasPreviewed] = useState(false);
@@ -512,7 +513,7 @@ interface CleanupResult {
 
 function CleanupSection({ ensureKey }: { ensureKey: () => boolean }) {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState('');
+  const [userId, setUserId] = useState(DEFAULT_USER_ID);
   const [importanceThreshold, setImportanceThreshold] = useState(0.1);
   const [previewResults, setPreviewResults] = useState<CleanupResult[] | null>(null);
   const [hasPreviewed, setHasPreviewed] = useState(false);

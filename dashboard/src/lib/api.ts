@@ -1,9 +1,13 @@
+import type { Memory, RawMemory, SearchResult } from './types';
+import { normalizeMemory } from './types';
+import { AUTH_NO_KEY_SENTINEL } from './constants';
+
 const API_BASE = '/api';
 
 function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const apiKey = localStorage.getItem('admin_api_key');
-  if (apiKey) headers['X-API-Key'] = apiKey;
+  if (apiKey && apiKey !== AUTH_NO_KEY_SENTINEL) headers['X-API-Key'] = apiKey;
   return headers;
 }
 
@@ -48,13 +52,25 @@ export const api = {
   // Health
   health: () => request<{ status: string }>('/health'),
 
-  // Memories
-  getMemories: (params: Record<string, string | number | undefined>) => {
+  // Memories — normalize metadata into flat Memory shape
+  getMemories: async (params: Record<string, string | number | undefined>): Promise<{
+    memories: Memory[];
+    total: number;
+    limit: number;
+    offset: number;
+  }> => {
     const filtered = Object.entries(params).filter(([, v]) => v !== undefined && v !== '');
     const qs = new URLSearchParams(filtered.map(([k, v]) => [k, String(v)])).toString();
-    return request<{ memories: unknown[]; total: number; limit: number; offset: number }>(`/memories?${qs}`);
+    const data = await request<{ memories: RawMemory[]; total: number; limit: number; offset: number }>(`/memories?${qs}`);
+    return {
+      ...data,
+      memories: (data.memories || []).map(normalizeMemory),
+    };
   },
-  getMemory: (id: string) => request<Record<string, unknown>>(`/memories/${id}`),
+  getMemory: async (id: string): Promise<Memory> => {
+    const raw = await request<RawMemory>(`/memories/${id}`);
+    return normalizeMemory(raw);
+  },
   deleteMemory: (id: string) => request(`/memories/${id}`, { method: 'DELETE' }),
   updateMemory: (id: string, data: string) =>
     request(`/memories/${id}`, { method: 'PUT', body: JSON.stringify({ data }) }),
@@ -67,13 +83,18 @@ export const api = {
   getMemorySource: (id: string) => request<{ results: unknown[] }>(`/memories/${id}/source`),
   getMemoryHistory: (id: string) => request<{ results: unknown[] }>(`/memories/${id}/history`),
 
-  // Search
-  search: (query: string, userId: string, limit = 10, signal?: AbortSignal) =>
-    request('/search', {
+  // Search — normalize results and handle both array and {results: [...]} shapes
+  search: async (query: string, userId: string, limit = 10, signal?: AbortSignal): Promise<SearchResult[]> => {
+    const data = await request<unknown>('/search', {
       method: 'POST',
       body: JSON.stringify({ query, user_id: userId, limit }),
       signal,
-    }),
+    });
+    const rawResults: RawMemory[] = Array.isArray(data)
+      ? data
+      : ((data as Record<string, unknown>).results as RawMemory[] || []);
+    return rawResults.map((r) => normalizeMemory(r) as SearchResult);
+  },
   recall: (query: string, userId: string, options: Record<string, unknown> = {}) =>
     request('/search/recall', {
       method: 'POST',

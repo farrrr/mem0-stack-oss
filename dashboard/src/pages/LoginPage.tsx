@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { KeyRound, Loader2, AlertCircle } from 'lucide-react';
@@ -9,30 +9,65 @@ export default function LoginPage() {
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
+  const [autoChecking, setAutoChecking] = useState(true);
   const [error, setError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // On mount, try to connect without any key (bypasses api.ts request() to avoid 401 redirect loop)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok && !cancelled) {
+          login('');
+          navigate('/');
+        }
+      } catch {
+        // Server requires auth or is unreachable — show login form
+      } finally {
+        if (!cancelled) setAutoChecking(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [login, navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!apiKey.trim()) return;
 
     setLoading(true);
     setError('');
 
     // Temporarily store key to test connection
-    localStorage.setItem('admin_api_key', apiKey.trim());
+    const keyValue = apiKey.trim();
+    if (keyValue) {
+      localStorage.setItem('admin_api_key', keyValue);
+    }
     try {
       await api.health();
-      login(apiKey.trim());
+      login(keyValue);
       navigate('/');
     } catch {
-      localStorage.removeItem('admin_api_key');
+      if (keyValue) localStorage.removeItem('admin_api_key');
       setError(t('login.error'));
     } finally {
       setLoading(false);
     }
   };
+
+  if (autoChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-accent)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            {t('login.checking_server')}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -70,6 +105,10 @@ export default function LoginPage() {
             }}
           />
 
+          <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
+            {t('login.key_optional')}
+          </p>
+
           {error && (
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-danger)' }}>
               <AlertCircle size={14} />
@@ -79,7 +118,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !apiKey.trim()}
+            disabled={loading}
             className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-accent)' }}
           >

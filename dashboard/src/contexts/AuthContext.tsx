@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { AUTH_NO_KEY_SENTINEL } from '../lib/constants';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -13,14 +14,21 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+function isLoggedIn(): boolean {
+  const key = localStorage.getItem('admin_api_key');
+  return key !== null && key.length > 0;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => ({
-    isAuthenticated: !!localStorage.getItem('admin_api_key'),
+    isAuthenticated: isLoggedIn(),
     hasMaintenanceKey: !!localStorage.getItem('maintenance_api_key'),
   }));
 
   const login = useCallback((apiKey: string) => {
-    localStorage.setItem('admin_api_key', apiKey);
+    // Store sentinel when no key is needed (empty key = server has no auth)
+    const storeValue = apiKey.trim() || AUTH_NO_KEY_SENTINEL;
+    localStorage.setItem('admin_api_key', storeValue);
     setState((s) => ({ ...s, isAuthenticated: true }));
   }, []);
 
