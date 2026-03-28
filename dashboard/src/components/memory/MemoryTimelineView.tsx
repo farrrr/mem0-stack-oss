@@ -83,13 +83,18 @@ export default function MemoryTimelineView({ memories, onSelect, selectedId }: M
                     {formatTime(mem.created_at)}
                   </span>
                 </div>
-                {mem.category && (
-                  <span
-                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mt-2"
-                    style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
-                  >
-                    {mem.category}
-                  </span>
+                {mem.category && mem.category.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {mem.category.map((cat) => (
+                      <span
+                        key={cat}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                        style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
+                      >
+                        {cat}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </button>
             ))}

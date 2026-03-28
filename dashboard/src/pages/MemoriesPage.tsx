@@ -380,14 +380,17 @@ export default function MemoriesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
-                      {mem.category && (
-                        <span
-                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                          style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
-                        >
-                          {mem.category}
-                        </span>
-                      )}
+                      <div className="flex flex-wrap gap-1">
+                        {mem.category?.map((cat) => (
+                          <span
+                            key={cat}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                            style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
+                          >
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5">
                       {mem.confidence && (

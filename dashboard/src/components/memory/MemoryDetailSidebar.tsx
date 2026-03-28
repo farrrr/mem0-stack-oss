@@ -69,15 +69,20 @@ function ConfidenceBadge({ confidence }: { confidence?: string }) {
   );
 }
 
-function CategoryBadge({ category }: { category?: string }) {
-  if (!category) return null;
+function CategoryBadges({ category }: { category?: string[] }) {
+  if (!category || category.length === 0) return null;
   return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-      style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
-    >
-      {category}
-    </span>
+    <div className="flex flex-wrap gap-1">
+      {category.map((cat) => (
+        <span
+          key={cat}
+          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+          style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
+        >
+          {cat}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -136,7 +141,7 @@ function DetailsTab({ memory, onDelete, onReclassify, isDeleting, isReclassifyin
         </div>
         <div>
           <MetadataRow label={t('memories.category')}>
-            <CategoryBadge category={memory.category} />
+            <CategoryBadges category={memory.category} />
           </MetadataRow>
           {memory.subcategory && (
             <MetadataRow label={t('memories.subcategory')}>

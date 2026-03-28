@@ -7,7 +7,7 @@ export interface RawMemory {
   id: string;
   memory: string;
   metadata?: {
-    category?: string;
+    category?: string | string[];
     subcategory?: string[];
     tags?: string[];
     confidence?: string;
@@ -31,7 +31,7 @@ export interface RawMemory {
 export interface Memory {
   id: string;
   memory: string;
-  category?: string;
+  category?: string[];
   subcategory?: string;
   tags?: string[];
   confidence?: string;
@@ -59,7 +59,10 @@ export function normalizeMemory(raw: RawMemory): Memory {
   const meta = raw.metadata || {};
   return {
     ...raw,
-    category: (raw as Record<string, unknown>).category as string | undefined ?? meta.category,
+    category: (() => {
+      const rawCat = (raw as Record<string, unknown>).category ?? meta.category;
+      return Array.isArray(rawCat) ? rawCat as string[] : rawCat ? [rawCat as string] : undefined;
+    })(),
     subcategory: ((raw as Record<string, unknown>).subcategory as string | undefined)
       ?? (Array.isArray(meta.subcategory) ? meta.subcategory.join(', ') : undefined),
     tags: (raw as Record<string, unknown>).tags as string[] | undefined ?? meta.tags,

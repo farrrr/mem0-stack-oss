@@ -303,14 +303,15 @@ function ResultCard({ result, onClick }: { result: SearchResult; onClick: () => 
 
       {/* Meta row */}
       <div className="flex items-center gap-2 mt-2">
-        {result.category && (
+        {result.category?.map((cat) => (
           <span
+            key={cat}
             className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
             style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
           >
-            {result.category}
+            {cat}
           </span>
-        )}
+        ))}
         <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {formatDate(result.created_at)}
         </span>

@@ -454,7 +454,7 @@ async def verify_classification(memory_text: str, classification: dict) -> dict:
                 f"You are a classification verifier. A memory was classified by another AI model.\n\n"
                 f"Memory: {memory_text}\n\n"
                 f"Classification:\n"
-                f"- Category: {classification.get('category', '')}\n"
+                f"- Category: {classification.get('category', [])}\n"
                 f"- Subcategory: {classification.get('subcategory', [])}\n"
                 f"- Tags: {classification.get('tags', [])}\n\n"
                 f"Rate the classification confidence:\n"
@@ -506,8 +506,11 @@ def store_classification(memory_id: str, classification: dict):
     if not classification:
         return
     try:
+        raw_category = classification.get("category")
+        if isinstance(raw_category, str):
+            raw_category = [raw_category]
         meta = {
-            "category": classification.get("category"),
+            "category": raw_category,
             "subcategory": classification.get("subcategory"),
             "tags": classification.get("tags", []),
             "confidence": classification.get("confidence"),
@@ -616,9 +619,10 @@ async def lifespan(app: FastAPI):
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memories_user_created
                     ON memories ((payload->>'user_id'), (payload->>'created_at') DESC NULLS LAST);
-                CREATE INDEX IF NOT EXISTS idx_memories_category
-                    ON memories ((payload->'metadata'->>'category'))
-                    WHERE payload->'metadata'->>'category' IS NOT NULL;
+                DROP INDEX IF EXISTS idx_memories_category;
+                CREATE INDEX IF NOT EXISTS idx_memories_category_gin
+                    ON memories USING gin ((payload->'metadata'->'category'))
+                    WHERE payload->'metadata'->'category' IS NOT NULL;
             """)
     logger.info("Extension tables ready.")
 
@@ -828,8 +832,8 @@ async def get_all_memories(
             conds.append("payload->'metadata'->>'app_id' = %s")
             params.append(app_id)
         if category:
-            conds.append("payload->'metadata'->>'category' = %s")
-            params.append(category)
+            conds.append("payload->'metadata'->'category' @> %s::jsonb")
+            params.append(json.dumps([category]))
         if confidence:
             conds.append("payload->'metadata'->>'confidence' = %s")
             params.append(confidence)
@@ -1842,9 +1846,20 @@ async def get_stats(
                     total = cur.fetchone()[0]
 
                     cur.execute(f"""
-                        SELECT payload->'metadata'->>'category', COUNT(*)
-                        FROM memories WHERE {base_cond} AND payload->'metadata'->>'category' IS NOT NULL
-                        GROUP BY 1 ORDER BY COUNT(*) DESC
+                        SELECT cat, COUNT(*) FROM (
+                            SELECT jsonb_array_elements_text(
+                                CASE
+                                    WHEN jsonb_typeof(payload->'metadata'->'category') = 'array'
+                                    THEN payload->'metadata'->'category'
+                                    WHEN jsonb_typeof(payload->'metadata'->'category') = 'string'
+                                    THEN jsonb_build_array(payload->'metadata'->>'category')
+                                    ELSE '[]'::jsonb
+                                END
+                            ) AS cat
+                            FROM memories WHERE {base_cond}
+                              AND payload->'metadata'->'category' IS NOT NULL
+                        ) sub
+                        GROUP BY cat ORDER BY COUNT(*) DESC
                     """, base_params)
                     categories = {r[0]: r[1] for r in cur.fetchall()}
 
