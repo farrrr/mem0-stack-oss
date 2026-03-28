@@ -84,6 +84,8 @@ RERANKER_PROVIDER = os.environ.get("RERANKER_PROVIDER", "")
 RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANKER_DEVICE = os.environ.get("RERANKER_DEVICE", "cpu")
 RERANKER_TOP_K = int(os.environ.get("RERANKER_TOP_K", "5"))
+RERANKER_BASE_URL = os.environ.get("RERANKER_BASE_URL", "http://localhost:8184")
+RERANKER_TIMEOUT = int(os.environ.get("RERANKER_TIMEOUT", "10"))
 
 # --- Graph LLM (optional, falls back to main LLM) ---
 GRAPH_LLM_PROVIDER = os.environ.get("GRAPH_LLM_PROVIDER", LLM_PROVIDER)
@@ -275,14 +277,24 @@ def _build_config() -> dict:
 
     # Reranker (optional)
     if RERANKER_PROVIDER:
-        config["reranker"] = {
-            "provider": RERANKER_PROVIDER,
-            "config": {
-                "model": RERANKER_MODEL,
-                "device": RERANKER_DEVICE,
-                "top_k": RERANKER_TOP_K,
-            },
-        }
+        if RERANKER_PROVIDER == "tei":
+            config["reranker"] = {
+                "provider": "tei",
+                "config": {
+                    "base_url": RERANKER_BASE_URL,
+                    "top_k": RERANKER_TOP_K,
+                    "timeout": RERANKER_TIMEOUT,
+                },
+            }
+        else:
+            config["reranker"] = {
+                "provider": RERANKER_PROVIDER,
+                "config": {
+                    "model": RERANKER_MODEL,
+                    "device": RERANKER_DEVICE,
+                    "top_k": RERANKER_TOP_K,
+                },
+            }
 
     # Top-level fallback LLM
     if FALLBACK_LLM_MODEL and FALLBACK_LLM_API_KEY:
