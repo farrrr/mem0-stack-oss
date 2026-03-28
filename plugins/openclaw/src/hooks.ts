@@ -137,6 +137,15 @@ export function registerHooks(
   api.on("agent_end", async (event: any, ctx: any) => {
     if (!cfg.autoCapture) return;
 
+    // Debug: log agent_end context for diagnosing cron/heartbeat filtering
+    const sessionId = ctx?.sessionKey ?? ctx?.sessionId ?? "unknown";
+    const agentId = ctx?.agentId ?? "unknown";
+    const source = ctx?.commandSource ?? "unknown";
+    const firstMsg = (event.messages ?? [])[0];
+    const promptLength = typeof firstMsg?.content === "string" ? firstMsg.content.length : 0;
+    api.logger.debug(`openclaw-mem0: [agent_end] session=${sessionId} agent=${agentId} source=${source}`);
+    api.logger.debug(`openclaw-mem0: [agent_end] prompt length=${promptLength}`);
+
     // Skip non-interactive sessions
     const sessionKeyStr: string = ctx?.sessionKey ?? ctx?.sessionId ?? "";
     if (isNonInteractiveSession(sessionKeyStr)) {
@@ -169,8 +178,8 @@ export function registerHooks(
     // DEFENSIVE: Skip failed agent runs
     if (event.success === false) return;
 
-    const sessionId = ctx?.sessionKey ?? ctx?.sessionId;
-    if (sessionId) session.setCurrentSessionId(sessionId);
+    const resolvedSessionId = ctx?.sessionKey ?? ctx?.sessionId;
+    if (resolvedSessionId) session.setCurrentSessionId(resolvedSessionId);
 
     let messages = event.messages ?? [];
     if (!messages.length) return;

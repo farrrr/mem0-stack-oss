@@ -287,20 +287,16 @@ export class Mem0HTTPProvider {
     if (agentId) params.set("agent_id", agentId);
     if (appId) params.set("app_id", appId);
 
-    try {
-      const resp = await fetch(`${this.baseUrl}/stats?${params}`, {
-        headers: this.headers(),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (resp.status === 404) {
-        // /stats endpoint not deployed yet - fallback to getAll count
-        return this.statsFallback(userId, agentId, appId);
-      }
-      if (!resp.ok) throw new Error(`stats() HTTP ${resp.status}: ${await resp.text()}`);
-      return (await resp.json()) as Record<string, unknown>;
-    } catch (err) {
-      throw err;
+    const resp = await fetch(`${this.baseUrl}/stats?${params}`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (resp.status === 404) {
+      // /stats endpoint not deployed yet - fallback to getAll count
+      return this.statsFallback(userId, agentId, appId);
     }
+    if (!resp.ok) throw new Error(`stats() HTTP ${resp.status}: ${await resp.text()}`);
+    return (await resp.json()) as Record<string, unknown>;
   }
 
   private async statsFallback(
