@@ -14,18 +14,24 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  // On mount, try to connect without any key (bypasses api.ts request() to avoid 401 redirect loop)
+  // On mount, check if server requires auth. If not, auto-login.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/health');
-        if (res.ok && !cancelled) {
+        // First check if server is reachable
+        const healthRes = await fetch('/api/health');
+        if (!healthRes.ok || cancelled) return;
+        // Then check if auth is required by hitting an endpoint that needs X-API-Key
+        const authRes = await fetch('/api/taxonomy');
+        if (authRes.ok && !cancelled) {
+          // No auth required — auto-login with empty key
           login('');
           navigate('/');
         }
+        // If 401, server requires auth — show login form
       } catch {
-        // Server requires auth or is unreachable — show login form
+        // Server unreachable — show login form
       } finally {
         if (!cancelled) setAutoChecking(false);
       }
