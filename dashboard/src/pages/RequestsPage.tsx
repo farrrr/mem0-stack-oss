@@ -31,7 +31,7 @@ interface RequestItem {
   user_id: string;
   latency_ms: number;
   status_code: number;
-  event_summary: string;
+  event_summary: Record<string, unknown> | string | null;
   created_at: string;
 }
 
@@ -224,7 +224,7 @@ export default function RequestsPage() {
                       className="px-4 py-3 max-w-[300px]"
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      {truncate(req.event_summary || '-', 60)}
+                      {truncate(typeof req.event_summary === 'object' ? JSON.stringify(req.event_summary) : (req.event_summary || '-'), 60)}
                     </td>
                   </tr>
                 ))}
