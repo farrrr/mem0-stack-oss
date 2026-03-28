@@ -1,5 +1,5 @@
 {
-  "name": "@mem0-oss/openclaw-plugin",
+  "name": "openclaw-mem0",
   "version": "0.1.0",
   "type": "module",
   "description": "Mem0 memory plugin for OpenClaw - connects to mem0-stack-oss API",
@@ -33,7 +33,7 @@
   },
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./src/index.ts"
     ]
   },
   "devDependencies": {
