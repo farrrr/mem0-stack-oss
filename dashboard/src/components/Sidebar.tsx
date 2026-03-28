@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Brain, Search, BarChart3, ScrollText, Users, Wrench, Activity,
+  LayoutDashboard, Brain, Search, BarChart3, ScrollText, Users, Wrench, Activity,
   Sun, Moon, Monitor, LogOut, Globe,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,7 +9,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { languages, changeLanguage } from '../i18n';
 
 const navItems = [
-  { to: '/', icon: Brain, labelKey: 'nav.memories' },
+  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { to: '/memories', icon: Brain, labelKey: 'nav.memories' },
   { to: '/search', icon: Search, labelKey: 'nav.search' },
   { to: '/stats', icon: BarChart3, labelKey: 'nav.stats' },
   { to: '/requests', icon: ScrollText, labelKey: 'nav.requests' },

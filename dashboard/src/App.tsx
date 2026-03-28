@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
 import MemoriesPage from './pages/MemoriesPage';
 import SearchPage from './pages/SearchPage';
 import StatsPage from './pages/StatsPage';
@@ -33,7 +34,8 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route element={<RequireAuth />}>
-                <Route index element={<MemoriesPage />} />
+                <Route index element={<DashboardPage />} />
+                <Route path="memories" element={<MemoriesPage />} />
                 <Route path="search" element={<SearchPage />} />
                 <Route path="stats" element={<StatsPage />} />
                 <Route path="requests" element={<RequestsPage />} />
