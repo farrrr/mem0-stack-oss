@@ -200,7 +200,8 @@ All configuration is via environment variables. See [`.env.example`](server/.env
 | `LLM_MODEL` | `gpt-4.1-nano-2025-04-14` | Model for fact extraction |
 | `LLM_BASE_URL` | *(empty)* | Custom endpoint (e.g. Cerebras, Together) |
 | `GRAPH_PROVIDER` | `falkordb` | `falkordb` or `neo4j` |
-| `RERANKER_PROVIDER` | *(empty)* | Set to `huggingface` to enable |
+| `RERANKER_PROVIDER` | *(empty)* | `tei` (HTTP, recommended) or `huggingface` (in-process) |
+| `RERANKER_BASE_URL` | `http://localhost:8184` | TEI reranker endpoint (when provider=tei) |
 | `CLASSIFY_ENABLED` | `true` | Background classification after each add |
 | `ADMIN_API_KEY` | *(empty)* | Set to secure all endpoints |
 | `MAINTENANCE_API_KEY` | *(empty)* | Set to protect maintenance endpoints |
@@ -209,9 +210,25 @@ All configuration is via environment variables. See [`.env.example`](server/.env
 
 The `server/prompts/` directory contains customizable templates:
 
-- `extraction.txt` — fact extraction prompt (supports `{date}` placeholder, replaced by SDK on each call)
+- `extraction.txt` — fact extraction prompt (supports `{date}` placeholder)
 - `classification.txt` — classification prompt (supports `{taxonomy}` and `{memory_text}`)
 - `taxonomy.json` — classification categories and subcategories
+
+### Reranker options
+
+| Mode | Config | Pros | Cons |
+|------|--------|------|------|
+| **TEI (recommended)** | `RERANKER_PROVIDER=tei` | No PyTorch, fast startup, ~200MB server | +2-5ms HTTP overhead |
+| **In-process** | `RERANKER_PROVIDER=huggingface` | Lowest latency (~5ms) | Requires PyTorch (~2GB), slow startup |
+| **Disabled** | `RERANKER_PROVIDER=` (empty) | Simplest, no dependencies | Vector search only, lower recall quality |
+
+To run TEI reranker:
+```bash
+docker run -d --name tei-reranker --gpus all \
+  -p 127.0.0.1:8184:80 \
+  ghcr.io/huggingface/text-embeddings-inference:1.7 \
+  --model-id BAAI/bge-reranker-v2-m3 --dtype float16 --port 80
+```
 
 ## What's different from upstream mem0 server
 
@@ -221,7 +238,7 @@ The `server/prompts/` directory contains customizable templates:
 | Init | module-level | FastAPI lifespan |
 | Graph store | Neo4j only | FalkorDB (default) + Neo4j |
 | LLM | OpenAI hard-coded | Any OpenAI-compatible endpoint |
-| Reranker | None | Optional (HuggingFace) |
+| Reranker | None | TEI (HTTP) or HuggingFace (in-process), switchable |
 | Classification | None | 3-stage pipeline (classify + verify + store) |
 | Combined search | None | UNION long-term + session + rerank |
 | Pagination | Client-side only | Server-side with filtering |
@@ -259,6 +276,18 @@ mem0-stack-oss/
 │   │   └── lib/                # API client, types, utils
 │   ├── package.json
 │   └── vite.config.ts
+├── plugins/
+│   └── openclaw/               # OpenClaw gateway memory plugin
+│       ├── src/
+│       │   ├── index.ts        # Plugin entry
+│       │   ├── providers.ts    # HTTP client (aligned to server API)
+│       │   ├── hooks.ts        # autoRecall + autoCapture
+│       │   ├── tools.ts        # 8 memory tools
+│       │   ├── filtering.ts    # Noise filtering (EN + zh-TW)
+│       │   ├── identity.ts     # User/agent mapping
+│       │   ├── config.ts       # Config parsing
+│       │   └── types.ts        # TypeScript interfaces
+│       └── openclaw.plugin.json
 ├── systemd/
 │   └── mem0-api.service        # systemd service template
 └── docs/
