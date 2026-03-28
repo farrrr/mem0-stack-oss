@@ -81,7 +81,11 @@ export const api = {
 
   // Source & History
   getMemorySource: (id: string) => request<{ results: unknown[] }>(`/memories/${id}/source`),
-  getMemoryHistory: (id: string) => request<{ results: unknown[] }>(`/memories/${id}/history`),
+  getMemoryHistory: async (id: string) => {
+    const data = await request<unknown>(`/memories/${id}/history`);
+    const results = Array.isArray(data) ? data : ((data as Record<string, unknown>).results || []);
+    return { results } as { results: unknown[] };
+  },
 
   // Search — normalize results and handle both array and {results: [...]} shapes
   search: async (query: string, userId: string, limit = 10, signal?: AbortSignal): Promise<SearchResult[]> => {

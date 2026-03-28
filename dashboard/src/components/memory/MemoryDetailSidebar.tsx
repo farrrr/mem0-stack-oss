@@ -234,7 +234,14 @@ function SourceTab({ memoryId }: { memoryId: string }) {
     return <div className="text-sm" style={{ color: 'var(--color-danger)' }}>{t('common.error')}</div>;
   }
 
-  const messages = (data?.results || []) as SourceMessage[];
+  const allMessages: SourceMessage[] = [];
+  for (const entry of (data?.results || [])) {
+    const msgs = (entry as Record<string, unknown>).messages;
+    if (Array.isArray(msgs)) {
+      allMessages.push(...(msgs as SourceMessage[]));
+    }
+  }
+  const messages = allMessages;
   if (messages.length === 0) {
     return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('memories.no_source')}</div>;
   }

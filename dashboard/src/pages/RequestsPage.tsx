@@ -20,9 +20,9 @@ const typeColors: Record<string, 'green' | 'blue' | 'purple'> = {
 
 interface DayStat {
   date: string;
-  add_count: number;
-  search_count: number;
-  recall_count: number;
+  add: number;
+  search: number;
+  recall: number;
 }
 
 interface RequestItem {
@@ -302,7 +302,7 @@ function DailyActivityChart({ stats }: { stats: DayStat[] }) {
   // Calculate max for Y axis
   const maxTotal = Math.max(
     1,
-    ...stats.map((s) => (s.add_count || 0) + (s.search_count || 0) + (s.recall_count || 0))
+    ...stats.map((s) => (s.add || 0) + (s.search || 0) + (s.recall || 0))
   );
 
   const chartWidth = stats.length * 20;
@@ -317,9 +317,9 @@ function DailyActivityChart({ stats }: { stats: DayStat[] }) {
         className="overflow-visible"
       >
         {stats.map((stat, i) => {
-          const addH = ((stat.add_count || 0) / maxTotal) * CHART_HEIGHT;
-          const searchH = ((stat.search_count || 0) / maxTotal) * CHART_HEIGHT;
-          const recallH = ((stat.recall_count || 0) / maxTotal) * CHART_HEIGHT;
+          const addH = ((stat.add || 0) / maxTotal) * CHART_HEIGHT;
+          const searchH = ((stat.search || 0) / maxTotal) * CHART_HEIGHT;
+          const recallH = ((stat.recall || 0) / maxTotal) * CHART_HEIGHT;
           const x = i * 20;
 
           // Stack: recall on bottom, search in middle, add on top
@@ -424,9 +424,9 @@ function DailyActivityChart({ stats }: { stats: DayStat[] }) {
           }}
         >
           <div className="font-semibold mb-1">{tooltip.stat.date}</div>
-          <div style={{ color: 'var(--color-success)' }}>ADD: {tooltip.stat.add_count || 0}</div>
-          <div style={{ color: 'var(--color-accent)' }}>SEARCH: {tooltip.stat.search_count || 0}</div>
-          <div style={{ color: 'var(--color-purple)' }}>RECALL: {tooltip.stat.recall_count || 0}</div>
+          <div style={{ color: 'var(--color-success)' }}>ADD: {tooltip.stat.add || 0}</div>
+          <div style={{ color: 'var(--color-accent)' }}>SEARCH: {tooltip.stat.search || 0}</div>
+          <div style={{ color: 'var(--color-purple)' }}>RECALL: {tooltip.stat.recall || 0}</div>
         </div>
       )}
     </div>
