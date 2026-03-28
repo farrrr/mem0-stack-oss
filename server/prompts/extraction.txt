@@ -33,7 +33,6 @@ Output: {{"facts" : ["Favourite movies are Inception and Interstellar"]}}
 Return the facts and preferences in a json format as shown above.
 
 Remember the following:
-- Today's date is {date}.
 - Do not return anything from the custom few shot example prompts provided above.
 - If you do not find anything relevant in the below conversation, you can return an empty list corresponding to the "facts" key.
 - Create the facts based on the user and assistant messages only. Do not pick anything from the system messages.
