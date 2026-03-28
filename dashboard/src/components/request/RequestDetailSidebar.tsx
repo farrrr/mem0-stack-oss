@@ -19,7 +19,7 @@ interface RequestData {
   status_code?: number;
   created_at?: string;
   req_payload?: unknown;
-  event_summary?: string;
+  event_summary?: Record<string, unknown> | string | null;
   memory_actions?: Record<string, unknown>[];
   retrieved_memories?: Record<string, unknown>[];
   error_msg?: string;
@@ -163,9 +163,17 @@ function RequestContent({ data, t }: { data: RequestData; t: TFunction }) {
       {/* Event summary */}
       {data.event_summary != null && (
         <Section title={t('requests.event_summary')}>
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {data.event_summary}
-          </p>
+          <pre
+            className="text-xs p-3 rounded-lg overflow-x-auto whitespace-pre-wrap break-all"
+            style={{
+              backgroundColor: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            {typeof data.event_summary === 'object'
+              ? JSON.stringify(data.event_summary, null, 2)
+              : data.event_summary}
+          </pre>
         </Section>
       )}
 
