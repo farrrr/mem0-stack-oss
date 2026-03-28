@@ -83,7 +83,7 @@ export class Mem0HTTPProvider {
   // ------------------------------------------------------------------
 
   async add(
-    messages: Array<{ role: string; content: string }>,
+    messages: Array<{ role: string; content: string; name?: string }>,
     options: AddOptions,
   ): Promise<AddResult> {
     const body: Record<string, unknown> = {
@@ -93,10 +93,6 @@ export class Mem0HTTPProvider {
     if (options.agent_id) body.agent_id = options.agent_id;
     if (options.app_id) body.app_id = options.app_id;
     if (options.run_id) body.run_id = options.run_id;
-    if (options.custom_instructions) body.custom_instructions = options.custom_instructions;
-    if (options.enable_graph != null) body.enable_graph = options.enable_graph;
-    if (options.output_format) body.output_format = options.output_format;
-    if (options.actor_id) body.actor_id = options.actor_id;
     if (options.metadata) body.metadata = options.metadata;
 
     const resp = await fetch(`${this.baseUrl}/memories`, {
@@ -178,7 +174,6 @@ export class Mem0HTTPProvider {
     const params = new URLSearchParams();
     if (options.user_id) params.set("user_id", options.user_id);
     if (options.agent_id) params.set("agent_id", options.agent_id);
-    if (options.app_id) params.set("app_id", options.app_id);
     if (options.run_id) params.set("run_id", options.run_id);
 
     const resp = await fetch(`${this.baseUrl}/memories?${params}`, {

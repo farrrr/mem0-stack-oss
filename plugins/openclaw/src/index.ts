@@ -91,15 +91,8 @@ const memoryPlugin = {
         user_id: identity.user_id,
         agent_id: identity.agent_id,
         app_id: identity.app_id,
-        actor_id: identity.agent_id,
-        enable_graph: cfg.enableGraph,
-        output_format: "v1.1",
       };
       if (runId) opts.run_id = runId;
-      // Only send customInstructions if explicitly configured
-      if (cfg.customInstructions) {
-        opts.custom_instructions = cfg.customInstructions;
-      }
       return opts;
     }
 

@@ -684,6 +684,7 @@ async def verify_maintenance_key(x_maintenance_key: Optional[str] = Header(None)
 class Message(BaseModel):
     role: str = Field(..., description="Role of the message (user or assistant).")
     content: str = Field(..., description="Message content.")
+    name: Optional[str] = Field(None, description="Speaker name, stored as actor_id by the SDK.")
 
 
 class MemoryCreate(BaseModel):
@@ -1075,13 +1076,14 @@ async def search_recall(
 
 class MemoryUpdate(BaseModel):
     data: str = Field(..., description="New memory content text.")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional metadata to update.")
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
 async def update_memory(memory_id: str, body: MemoryUpdate, mem0=Depends(get_mem0), _api_key: Optional[str] = Depends(verify_api_key)):
     """Update an existing memory with new content."""
     try:
-        return await mem0.update(memory_id=memory_id, data=body.data)
+        return await mem0.update(memory_id=memory_id, data=body.data, metadata=body.metadata)
     except Exception as e:
         logger.exception("Error in update_memory:")
         raise HTTPException(status_code=500, detail=str(e))

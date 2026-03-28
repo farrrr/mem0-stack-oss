@@ -204,11 +204,18 @@ export function registerHooks(
     const identity = resolve({}, ctx?.agentId);
     const currentSessionId = session.getCurrentSessionId();
 
+    // Inject "name" field so the SDK stores actor_id per message.
+    // SDK behavior: msg.get("name") → stored as actor_id in metadata.
+    const messagesWithActor = formatted.map((m) => ({
+      ...m,
+      name: m.role === "user" ? identity.user_id : identity.agent_id,
+    }));
+
     // Fire-and-forget: don't await - agent_end returns immediately
     const capturePromise = (async () => {
       try {
         const addOpts = buildAddOptions(identity, currentSessionId);
-        const result = await provider.add(formatted, addOpts);
+        const result = await provider.add(messagesWithActor, addOpts);
         const count = result.results?.length ?? 0;
         if (count > 0) api.logger.info(`openclaw-mem0: auto-captured ${count} memories`);
       } catch (err) {

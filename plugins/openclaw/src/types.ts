@@ -45,10 +45,6 @@ export interface AddOptions {
   agent_id?: string;
   app_id?: string;
   run_id?: string;
-  custom_instructions?: string;
-  enable_graph?: boolean;
-  output_format?: string;
-  actor_id?: string;
   metadata?: Record<string, unknown>;
 }
 
