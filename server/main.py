@@ -792,12 +792,24 @@ async def add_memory(
                     if memory_text:
                         background_tasks.add_task(classify_and_store, r["id"], memory_text)
 
+        # Count event types for detailed logging
+        event_counts = {}
+        for r in add_results:
+            event = r.get("event", "NONE")
+            event_counts[event] = event_counts.get(event, 0) + 1
+
         elapsed_ms = int((time.time() - start) * 1000)
+        # Truncate message content for logging (avoid huge DB rows)
+        truncated_msgs = [
+            {**m, "content": (m.get("content") or "")[:500]}
+            for m in raw_messages
+        ]
         background_tasks.add_task(
             log_request, "ADD", memory_create.user_id or "", memory_create.run_id,
             elapsed_ms, 200, len(add_results) > 0,
-            {"count": len(add_results)},
-            {"user_id": memory_create.user_id, "agent_id": memory_create.agent_id},
+            {"count": len(add_results), **event_counts},
+            {"user_id": memory_create.user_id, "agent_id": memory_create.agent_id, "messages": truncated_msgs},
+            memory_actions=add_results,
         )
         return JSONResponse(content=response)
     except Exception as e:
@@ -930,11 +942,17 @@ async def search_memories(
         result = await mem0.search(query=search_req.query, **params)
         elapsed_ms = int((time.time() - start) * 1000)
         hits = result.get("results", result) if isinstance(result, dict) else result
+        # Store only essential fields for retrieved_memories log
+        hits_summary = [
+            {"id": h.get("id"), "memory": (h.get("memory") or "")[:500], "score": h.get("score")}
+            for h in (hits if isinstance(hits, list) else [])
+        ]
         background_tasks.add_task(
             log_request, "SEARCH", search_req.user_id or "", search_req.run_id,
             elapsed_ms, 200, bool(hits),
             {"hits": len(hits) if isinstance(hits, list) else 0},
             {"query": search_req.query, "user_id": search_req.user_id},
+            retrieved_memories=hits_summary,
         )
         return result
     except Exception as e:
@@ -1079,11 +1097,17 @@ async def search_recall(
             "RECALL user=%s query='%s' run_id=%s elapsed=%.2fs hits=%d",
             req.user_id, req.query[:50], req.run_id, elapsed, len(results),
         )
+        # Store only essential fields for retrieved_memories log
+        results_summary = [
+            {"id": r.get("id"), "memory": (r.get("memory") or "")[:500], "score": r.get("score")}
+            for r in results
+        ]
         background_tasks.add_task(
             log_request, "RECALL", req.user_id, req.run_id,
             int(elapsed * 1000), 200, len(results) > 0,
             {"hits": len(results), "has_run_id": bool(req.run_id), "rerank": req.rerank},
             {"query": req.query, "user_id": req.user_id, "run_id": req.run_id},
+            retrieved_memories=results_summary,
         )
         return {"results": results, "elapsed_seconds": round(elapsed, 2)}
     except Exception as e:
@@ -1272,6 +1296,7 @@ async def list_requests(
     request_type: Optional[str] = None,
     has_results: Optional[bool] = None,
     user_id: Optional[str] = None,
+    days: Optional[int] = Query(default=None, ge=1, le=365),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     _api_key: Optional[str] = Depends(verify_api_key),
@@ -1289,6 +1314,9 @@ async def list_requests(
         if user_id:
             conds.append("user_id = %s")
             params.append(user_id)
+        if days is not None:
+            conds.append("created_at >= NOW() - make_interval(days => %s)")
+            params.append(days)
         where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
         def _query():
