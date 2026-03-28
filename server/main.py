@@ -94,8 +94,10 @@ GRAPH_LLM_API_KEY = os.environ.get("GRAPH_LLM_API_KEY", LLM_API_KEY)
 GRAPH_LLM_BASE_URL = os.environ.get("GRAPH_LLM_BASE_URL", LLM_BASE_URL)
 
 # --- Fallback LLM (optional) ---
+FALLBACK_LLM_PROVIDER = os.environ.get("FALLBACK_LLM_PROVIDER", "openai")
 FALLBACK_LLM_MODEL = os.environ.get("FALLBACK_LLM_MODEL", "")
 FALLBACK_LLM_API_KEY = os.environ.get("FALLBACK_LLM_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+FALLBACK_LLM_BASE_URL = os.environ.get("FALLBACK_LLM_BASE_URL", "")
 
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 
@@ -222,14 +224,17 @@ def _build_graph_config() -> dict:
 
     # Fallback LLM for graph
     if FALLBACK_LLM_MODEL and FALLBACK_LLM_API_KEY:
+        fallback_cfg = {
+            "model": FALLBACK_LLM_MODEL,
+            "api_key": FALLBACK_LLM_API_KEY,
+            "temperature": 0,
+            "max_tokens": 4096,
+        }
+        if FALLBACK_LLM_BASE_URL:
+            fallback_cfg["openai_base_url"] = FALLBACK_LLM_BASE_URL
         config["fallback_llm"] = {
-            "provider": "openai",
-            "config": {
-                "model": FALLBACK_LLM_MODEL,
-                "api_key": FALLBACK_LLM_API_KEY,
-                "temperature": 0,
-                "max_tokens": 4096,
-            },
+            "provider": FALLBACK_LLM_PROVIDER,
+            "config": fallback_cfg,
         }
 
     return config
@@ -298,14 +303,17 @@ def _build_config() -> dict:
 
     # Top-level fallback LLM
     if FALLBACK_LLM_MODEL and FALLBACK_LLM_API_KEY:
+        fallback_cfg = {
+            "model": FALLBACK_LLM_MODEL,
+            "api_key": FALLBACK_LLM_API_KEY,
+            "temperature": 0,
+            "max_tokens": 4096,
+        }
+        if FALLBACK_LLM_BASE_URL:
+            fallback_cfg["openai_base_url"] = FALLBACK_LLM_BASE_URL
         config["fallback_llm"] = {
-            "provider": "openai",
-            "config": {
-                "model": FALLBACK_LLM_MODEL,
-                "api_key": FALLBACK_LLM_API_KEY,
-                "temperature": 0,
-                "max_tokens": 4096,
-            },
+            "provider": FALLBACK_LLM_PROVIDER,
+            "config": fallback_cfg,
         }
 
     # Custom extraction prompt — {date} placeholder is replaced by SDK on each add() call

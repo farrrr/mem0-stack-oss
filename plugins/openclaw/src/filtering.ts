@@ -107,6 +107,32 @@ function isGenericAssistantResponse(content: string): boolean {
 }
 
 // ============================================================================
+// External Untrusted Content Wrapper Stripping
+// ============================================================================
+
+/**
+ * Strip <<<EXTERNAL_UNTRUSTED_CONTENT>>> wrappers, keeping inner content.
+ * Handles all Source types (External, Channel metadata, Web Fetch, etc.)
+ * and all UNTRUSTED descriptor variants.
+ *
+ * NOTE: RegExp is built inside the function (not module-level) to avoid
+ * /g flag lastIndex state bugs across multiple calls.
+ */
+function stripUntrustedWrappers(content: string): string {
+  if (!content.includes("<<<EXTERNAL_UNTRUSTED_CONTENT")) return content;
+
+  // Main pass: matched open + close tags
+  const mainRe = /<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>\s*(?:Source:\s*[^\n]*\s*)?(?:---\s*)?(?:UNTRUSTED[^\n]*\s*)?([\s\S]*?)<<<END_EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>/g;
+  let result = content.replace(mainRe, "$1");
+
+  // Fallback: orphaned opening tags (close tag missing due to truncation)
+  const orphanRe = /<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>\s*(?:Source:\s*[^\n]*\s*)?(?:---\s*)?(?:UNTRUSTED[^\n]*\s*)?/g;
+  result = result.replace(orphanRe, "");
+
+  return result.trim();
+}
+
+// ============================================================================
 // Search Query Cleanup
 // ============================================================================
 
@@ -142,7 +168,11 @@ export function cleanSearchQuery(raw: string): string {
   // 5. Remove <relevant-memories> block (avoid recall feedback loop)
   cleaned = cleaned.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/g, "");
 
-  // 6. Collapse excessive whitespace
+  // 6. Strip <<<EXTERNAL_UNTRUSTED_CONTENT>>> wrappers (prompt injection protection)
+  //    Keep the actual user content inside, strip wrapper tags + metadata lines
+  cleaned = stripUntrustedWrappers(cleaned);
+
+  // 7. Collapse excessive whitespace
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
 
   return cleaned;
@@ -268,6 +298,9 @@ export function filterMessagesForExtraction(
     if (content.includes("<relevant-memories>")) {
       content = content.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/g, "").trim();
     }
+
+    // Strip <<<EXTERNAL_UNTRUSTED_CONTENT>>> wrappers, keeping inner content
+    content = stripUntrustedWrappers(content);
 
     // Clean user messages of metadata contamination
     if (role === "user") {
