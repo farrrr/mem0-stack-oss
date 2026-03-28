@@ -2,13 +2,19 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  X, RefreshCw, Trash2, ThumbsUp, ThumbsDown, AlertTriangle,
-  MessageSquare, User, Bot,
+  X, RefreshCw, Trash2, ChevronUp, ChevronDown,
+  Copy, Check, User, Bot, Play, AppWindow,
+  ChevronRight,
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import { formatDateTime } from '../../lib/utils';
 import type { Memory } from '../../lib/types';
 import Button from '../ui/Button';
+import Badge from '../ui/Badge';
 
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 interface SourceMessage {
   role?: string;
   content?: string;
@@ -19,16 +25,8 @@ interface HistoryEntry {
   id?: string;
   old_memory?: string;
   new_memory?: string;
+  memory?: string;
   event?: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
-
-interface FeedbackEntry {
-  id?: string;
-  user_id?: string;
-  feedback?: string;
-  reason?: string;
   created_at?: string;
   [key: string]: unknown;
 }
@@ -38,74 +36,88 @@ interface MemoryDetailSidebarProps {
   onClose: () => void;
   onDeleted?: () => void;
   onReclassified?: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
-type TabKey = 'details' | 'source' | 'history' | 'feedback';
+type TabKey = 'details' | 'source_updates';
 
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleString();
-}
-
-function ConfidenceBadge({ confidence }: { confidence?: string }) {
+/* ------------------------------------------------------------------ */
+/*  Shared sub-components                                              */
+/* ------------------------------------------------------------------ */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
   const { t } = useTranslation();
-  if (!confidence) return null;
 
-  const colorMap: Record<string, { bg: string; text: string }> = {
-    high: { bg: 'var(--color-success)', text: 'var(--color-bg-primary)' },
-    medium: { bg: 'var(--color-warning)', text: 'var(--color-text-primary)' },
-    low: { bg: 'var(--color-danger)', text: 'var(--color-bg-primary)' },
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
-  const colors = colorMap[confidence] || { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-primary)' };
-  const labelKey = `memories.confidence_${confidence}` as const;
 
   return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-      style={{ backgroundColor: colors.bg, color: colors.text }}
+    <button
+      onClick={handleCopy}
+      className="p-0.5 rounded transition-colors cursor-pointer"
+      style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-muted)' }}
+      title={t('requests.copy_id')}
     >
-      {t(labelKey)}
-    </span>
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
   );
 }
 
-function CategoryBadges({ category }: { category?: string[] }) {
-  if (!category || category.length === 0) return null;
+function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
-    <div className="flex flex-wrap gap-1">
-      {category.map((cat) => (
-        <span
-          key={cat}
-          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-          style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
-        >
-          {cat}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function TagBadge({ tag }: { tag: string }) {
-  return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs"
-      style={{ backgroundColor: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}
+    <button
+      className="px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer"
+      style={{
+        color: active ? 'var(--color-accent)' : 'var(--color-text-muted)',
+        borderBottom: active ? '2px solid var(--color-accent)' : '2px solid transparent',
+      }}
+      onClick={onClick}
     >
-      {tag}
-    </span>
+      {label}
+    </button>
   );
 }
 
-function MetadataRow({ label, children }: { label: string; children: React.ReactNode }) {
+function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="flex items-start gap-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
-      <span className="text-xs font-medium w-28 shrink-0" style={{ color: 'var(--color-text-muted)' }}>
-        {label}
-      </span>
-      <div className="text-sm flex-1 min-w-0" style={{ color: 'var(--color-text-primary)' }}>
-        {children}
+    <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--color-text-muted)' }}>
+      {title}
+    </h3>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Entity Card                                                        */
+/* ------------------------------------------------------------------ */
+function EntityCard({ icon: Icon, label, value }: {
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2.5 rounded-lg"
+      style={{ backgroundColor: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
+    >
+      <div
+        className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
+        style={{ backgroundColor: 'color-mix(in srgb, var(--color-accent) 15%, transparent)' }}
+      >
+        <Icon size={14} />
       </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
+          {label}
+        </div>
+        <div className="text-xs font-mono truncate" style={{ color: 'var(--color-text-primary)' }}>
+          {value}
+        </div>
+      </div>
+      <CopyButton text={value} />
     </div>
   );
 }
@@ -121,82 +133,142 @@ function DetailsTab({ memory, onDelete, onReclassify, isDeleting, isReclassifyin
   isReclassifying: boolean;
 }) {
   const { t } = useTranslation();
+  const [metadataOpen, setMetadataOpen] = useState(false);
+
+  const entities: { icon: React.ComponentType<{ size?: number }>; label: string; value: string }[] = [];
+  if (memory.user_id) entities.push({ icon: User, label: t('memories.user_id'), value: memory.user_id });
+  if (memory.run_id) entities.push({ icon: Play, label: t('memories.run_id'), value: memory.run_id });
+  if (memory.agent_id) entities.push({ icon: Bot, label: t('memories.agent_id'), value: memory.agent_id });
+  if (memory.app_id) entities.push({ icon: AppWindow, label: t('memories.app_id'), value: memory.app_id });
+
+  // Metadata items for the collapsible section
+  const hasMetadata = memory.subcategory || (memory.tags && memory.tags.length > 0)
+    || memory.importance_score !== undefined || memory.classified_by;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Full memory text */}
+    <div className="flex flex-col gap-5 px-5 py-4">
+      {/* ID row */}
       <div>
-        <div className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-          {t('memories.memory_text')}
+        <SectionHeader title="ID" />
+        <div className="flex items-center gap-2">
+          <code
+            className="text-xs font-mono px-2 py-1.5 rounded-md flex-1 truncate"
+            style={{ backgroundColor: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}
+          >
+            {memory.id}
+          </code>
+          <CopyButton text={memory.id} />
         </div>
-        <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-primary)' }}>
+      </div>
+
+      {/* Memory text */}
+      <div>
+        <SectionHeader title={t('memories.memory_text')} />
+        <p
+          className="text-sm leading-relaxed"
+          style={{ color: 'var(--color-text-primary)', lineHeight: '1.7' }}
+        >
           {memory.memory}
         </p>
       </div>
 
-      {/* Metadata */}
-      <div>
-        <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-          {t('memories.metadata')}
+      {/* Category badges */}
+      {memory.category && memory.category.length > 0 && (
+        <div>
+          <SectionHeader title={t('memories.category')} />
+          <div className="flex flex-wrap gap-1.5">
+            {memory.category.map((cat) => (
+              <Badge key={cat} label={cat} color="blue" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Created / Updated — two columns */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <SectionHeader title={t('memories.created_at')} />
+          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {memory.created_at ? formatDateTime(memory.created_at) : '-'}
+          </span>
         </div>
         <div>
-          <MetadataRow label={t('memories.category')}>
-            <CategoryBadges category={memory.category} />
-          </MetadataRow>
-          {memory.subcategory && (
-            <MetadataRow label={t('memories.subcategory')}>
-              {memory.subcategory}
-            </MetadataRow>
-          )}
-          {memory.tags && memory.tags.length > 0 && (
-            <MetadataRow label={t('memories.tags')}>
-              <div className="flex flex-wrap gap-1">
-                {memory.tags.map((tag) => <TagBadge key={tag} tag={tag} />)}
-              </div>
-            </MetadataRow>
-          )}
-          <MetadataRow label={t('memories.confidence')}>
-            <ConfidenceBadge confidence={memory.confidence} />
-          </MetadataRow>
-          {memory.importance_score !== undefined && (
-            <MetadataRow label={t('memories.importance_score')}>
-              {memory.importance_score.toFixed(2)}
-            </MetadataRow>
-          )}
-          {memory.classified_by && (
-            <MetadataRow label={t('memories.classified_by')}>
-              {memory.classified_by}
-            </MetadataRow>
-          )}
-          {memory.user_id && (
-            <MetadataRow label={t('memories.user_id')}>
-              <span className="font-mono text-xs">{memory.user_id}</span>
-            </MetadataRow>
-          )}
-          {memory.agent_id && (
-            <MetadataRow label={t('memories.agent_id')}>
-              <span className="font-mono text-xs">{memory.agent_id}</span>
-            </MetadataRow>
-          )}
-          {memory.run_id && (
-            <MetadataRow label={t('memories.run_id')}>
-              <span className="font-mono text-xs">{memory.run_id}</span>
-            </MetadataRow>
-          )}
-          <MetadataRow label={t('memories.created_at')}>
-            {formatDate(memory.created_at)}
-          </MetadataRow>
-          <MetadataRow label={t('memories.updated_at')}>
-            {formatDate(memory.updated_at)}
-          </MetadataRow>
+          <SectionHeader title={t('memories.updated_at')} />
+          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {memory.updated_at ? formatDateTime(memory.updated_at) : '-'}
+          </span>
         </div>
       </div>
 
+      {/* Entities */}
+      {entities.length > 0 && (
+        <div>
+          <SectionHeader title={t('requests.entities')} />
+          <div className="flex flex-col gap-2">
+            {entities.map((ent) => (
+              <EntityCard key={ent.label} icon={ent.icon} label={ent.label} value={ent.value} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metadata (collapsible) */}
+      {hasMetadata && (
+        <div>
+          <button
+            className="flex items-center gap-1.5 cursor-pointer w-full"
+            onClick={() => setMetadataOpen(!metadataOpen)}
+          >
+            <ChevronRight
+              size={14}
+              style={{
+                color: 'var(--color-text-muted)',
+                transform: metadataOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 150ms ease',
+              }}
+            />
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
+              {t('memories.metadata')}
+            </span>
+          </button>
+
+          {metadataOpen && (
+            <div className="mt-3 flex flex-col gap-3 pl-5">
+              {memory.subcategory && (
+                <MetadataItem label={t('memories.subcategory')} value={memory.subcategory} />
+              )}
+              {memory.tags && memory.tags.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                    {t('memories.tags')}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {memory.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs"
+                        style={{ backgroundColor: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {memory.importance_score !== undefined && (
+                <MetadataItem label={t('memories.importance_score')} value={memory.importance_score.toFixed(2)} />
+              )}
+              {memory.classified_by && (
+                <MetadataItem label={t('memories.classified_by')} value={memory.classified_by} />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Actions */}
       <div>
-        <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-          {t('memories.actions')}
-        </div>
+        <SectionHeader title={t('memories.actions')} />
         <div className="flex gap-2">
           <Button
             variant="secondary"
@@ -222,277 +294,179 @@ function DetailsTab({ memory, onDelete, onReclassify, isDeleting, isReclassifyin
   );
 }
 
+function MetadataItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-medium uppercase tracking-wider mb-0.5" style={{ color: 'var(--color-text-muted)' }}>
+        {label}
+      </div>
+      <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
-/*  Source Tab                                                          */
+/*  Source & Updates Tab                                                */
 /* ------------------------------------------------------------------ */
-function SourceTab({ memoryId }: { memoryId: string }) {
+function SourceUpdatesTab({ memoryId }: { memoryId: string }) {
   const { t } = useTranslation();
-  const { data, isLoading, error } = useQuery({
+
+  const { data: sourceData, isLoading: sourceLoading } = useQuery({
     queryKey: ['memory-source', memoryId],
     queryFn: () => api.getMemorySource(memoryId),
   });
 
-  if (isLoading) {
-    return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('common.loading')}</div>;
-  }
-  if (error) {
-    return <div className="text-sm" style={{ color: 'var(--color-danger)' }}>{t('common.error')}</div>;
-  }
+  const { data: historyData, isLoading: historyLoading } = useQuery({
+    queryKey: ['memory-history', memoryId],
+    queryFn: () => api.getMemoryHistory(memoryId),
+  });
 
+  // Parse source messages
   const allMessages: SourceMessage[] = [];
-  for (const entry of (data?.results || [])) {
+  for (const entry of (sourceData?.results || [])) {
     const msgs = (entry as Record<string, unknown>).messages;
     if (Array.isArray(msgs)) {
       allMessages.push(...(msgs as SourceMessage[]));
     }
   }
-  const messages = allMessages;
-  if (messages.length === 0) {
-    return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('memories.no_source')}</div>;
-  }
+
+  const historyEntries = (historyData?.results || []) as HistoryEntry[];
 
   return (
-    <div className="flex flex-col gap-3">
-      {messages.map((msg, i) => (
-        <div
-          key={i}
-          className="rounded-lg p-3"
-          style={{ backgroundColor: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
-        >
-          <div className="flex items-center gap-2 mb-2">
-            {msg.role === 'user' ? (
-              <User size={14} style={{ color: 'var(--color-accent)' }} />
-            ) : (
-              <Bot size={14} style={{ color: 'var(--color-success)' }} />
-            )}
-            <span
-              className="text-xs font-medium px-1.5 py-0.5 rounded"
-              style={{
-                backgroundColor: msg.role === 'user' ? 'var(--color-accent)' : 'var(--color-success)',
-                color: '#fff',
-              }}
-            >
-              {msg.role || 'unknown'}
+    <div className="flex flex-col gap-6 px-5 py-4">
+      {/* Source section */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <SectionHeader title={t('memories.source')} />
+          {allMessages.length > 3 && (
+            <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              Scroll to see more
             </span>
-          </div>
-          <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>
-            {msg.content || ''}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  History Tab                                                        */
-/* ------------------------------------------------------------------ */
-function HistoryTab({ memoryId }: { memoryId: string }) {
-  const { t } = useTranslation();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['memory-history', memoryId],
-    queryFn: () => api.getMemoryHistory(memoryId),
-  });
-
-  if (isLoading) {
-    return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('common.loading')}</div>;
-  }
-  if (error) {
-    return <div className="text-sm" style={{ color: 'var(--color-danger)' }}>{t('common.error')}</div>;
-  }
-
-  const entries = (data?.results || []) as HistoryEntry[];
-  if (entries.length === 0) {
-    return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('memories.no_history')}</div>;
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {entries.map((entry, i) => (
-        <div
-          key={entry.id || i}
-          className="rounded-lg p-3"
-          style={{ backgroundColor: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span
-              className="text-xs font-medium px-1.5 py-0.5 rounded"
-              style={{ backgroundColor: 'var(--color-info)', color: '#fff' }}
-            >
-              {entry.event || 'update'}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {formatDate(entry.created_at)}
-            </span>
-          </div>
-          {entry.old_memory && (
-            <div className="mb-1">
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Old: </span>
-              <span className="text-sm line-through" style={{ color: 'var(--color-text-secondary)' }}>
-                {entry.old_memory}
-              </span>
-            </div>
-          )}
-          {entry.new_memory && (
-            <div>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>New: </span>
-              <span className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                {entry.new_memory}
-              </span>
-            </div>
           )}
         </div>
-      ))}
-    </div>
-  );
-}
 
-/* ------------------------------------------------------------------ */
-/*  Feedback Tab                                                       */
-/* ------------------------------------------------------------------ */
-function FeedbackTab({ memoryId, userId }: { memoryId: string; userId?: string }) {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const [feedbackType, setFeedbackType] = useState<string>('');
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+        {sourceLoading && (
+          <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('common.loading')}</div>
+        )}
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['memory-feedback', memoryId],
-    queryFn: () => api.getFeedback(memoryId),
-  });
+        {!sourceLoading && allMessages.length === 0 && (
+          <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('memories.no_source')}</div>
+        )}
 
-  const handleSubmit = async () => {
-    if (!feedbackType) return;
-    setSubmitting(true);
-    try {
-      await api.submitFeedback(memoryId, userId || '', feedbackType, reason || undefined);
-      setFeedbackType('');
-      setReason('');
-      queryClient.invalidateQueries({ queryKey: ['memory-feedback', memoryId] });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const feedbacks = (data?.feedbacks || []) as FeedbackEntry[];
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Submit form */}
-      <div
-        className="rounded-lg p-3"
-        style={{ backgroundColor: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
-      >
-        <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-          {t('feedback.submit')}
-        </div>
-        <div className="flex gap-2 mb-2">
-          <button
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer"
-            style={{
-              backgroundColor: feedbackType === 'positive' ? 'var(--color-success)' : 'var(--color-bg-hover)',
-              color: feedbackType === 'positive' ? '#fff' : 'var(--color-text-secondary)',
-            }}
-            onClick={() => setFeedbackType('positive')}
-          >
-            <ThumbsUp size={12} />
-            {t('feedback.positive')}
-          </button>
-          <button
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer"
-            style={{
-              backgroundColor: feedbackType === 'negative' ? 'var(--color-warning)' : 'var(--color-bg-hover)',
-              color: feedbackType === 'negative' ? '#fff' : 'var(--color-text-secondary)',
-            }}
-            onClick={() => setFeedbackType('negative')}
-          >
-            <ThumbsDown size={12} />
-            {t('feedback.negative')}
-          </button>
-          <button
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer"
-            style={{
-              backgroundColor: feedbackType === 'very_negative' ? 'var(--color-danger)' : 'var(--color-bg-hover)',
-              color: feedbackType === 'very_negative' ? '#fff' : 'var(--color-text-secondary)',
-            }}
-            onClick={() => setFeedbackType('very_negative')}
-          >
-            <AlertTriangle size={12} />
-            {t('feedback.very_negative')}
-          </button>
-        </div>
-        <textarea
-          className="w-full rounded-lg px-3 py-2 text-sm resize-none"
-          style={{
-            backgroundColor: 'var(--color-bg-primary)',
-            color: 'var(--color-text-primary)',
-            border: '1px solid var(--color-border)',
-          }}
-          rows={2}
-          placeholder={t('feedback.reason_placeholder')}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-        <div className="mt-2 flex justify-end">
-          <Button
-            variant="primary"
-            size="sm"
-            icon={MessageSquare}
-            loading={submitting}
-            disabled={!feedbackType}
-            onClick={handleSubmit}
-          >
-            {t('feedback.submit')}
-          </Button>
-        </div>
+        {allMessages.length > 0 && (
+          <div className="max-h-[320px] overflow-y-auto flex flex-col gap-2.5 pr-1">
+            {allMessages.map((msg, i) => (
+              <div
+                key={i}
+                className="rounded-lg p-3"
+                style={{ backgroundColor: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  {msg.role === 'user' ? (
+                    <User size={14} style={{ color: 'var(--color-accent)' }} />
+                  ) : (
+                    <Bot size={14} style={{ color: 'var(--color-success)' }} />
+                  )}
+                  <span
+                    className="text-xs font-medium px-1.5 py-0.5 rounded"
+                    style={{
+                      backgroundColor: msg.role === 'user' ? 'var(--color-accent)' : 'var(--color-success)',
+                      color: '#fff',
+                    }}
+                  >
+                    {msg.role || 'unknown'}
+                  </span>
+                </div>
+                <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>
+                  {msg.content || ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Existing feedbacks */}
-      {isLoading && (
-        <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('common.loading')}</div>
-      )}
-      {error && (
-        <div className="text-sm" style={{ color: 'var(--color-danger)' }}>{t('common.error')}</div>
-      )}
-      {!isLoading && feedbacks.length === 0 && (
-        <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('memories.no_feedback')}</div>
-      )}
-      {feedbacks.map((fb, i) => {
-        const fbColorMap: Record<string, string> = {
-          positive: 'var(--color-success)',
-          negative: 'var(--color-warning)',
-          very_negative: 'var(--color-danger)',
-        };
-        return (
-          <div
-            key={fb.id || i}
-            className="rounded-lg p-3"
-            style={{ backgroundColor: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span
-                className="text-xs font-medium px-1.5 py-0.5 rounded"
-                style={{
-                  backgroundColor: fbColorMap[fb.feedback || ''] || 'var(--color-bg-hover)',
-                  color: '#fff',
-                }}
-              >
-                {fb.feedback}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                {formatDate(fb.created_at)}
-              </span>
-            </div>
-            {fb.reason && (
-              <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>{fb.reason}</p>
-            )}
-            {fb.user_id && (
-              <p className="text-xs mt-1 font-mono" style={{ color: 'var(--color-text-muted)' }}>{fb.user_id}</p>
-            )}
+      {/* Divider */}
+      <div style={{ borderTop: '1px solid var(--color-border)' }} />
+
+      {/* Changelog section */}
+      <div>
+        <SectionHeader title={t('memories.changelog')} />
+
+        {historyLoading && (
+          <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('common.loading')}</div>
+        )}
+
+        {!historyLoading && historyEntries.length === 0 && (
+          <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('memories.no_history')}</div>
+        )}
+
+        {historyEntries.length > 0 && (
+          <div className="flex flex-col gap-0">
+            {/* Reverse to show newest first, add version numbers */}
+            {[...historyEntries].reverse().map((entry, i) => {
+              const versionNum = historyEntries.length - i;
+              const memoryText = entry.new_memory || entry.memory || entry.old_memory || '';
+              const entryId = entry.id || '';
+
+              return (
+                <div key={entry.id || i} className="flex gap-3 relative">
+                  {/* Timeline line */}
+                  {i < historyEntries.length - 1 && (
+                    <div
+                      className="absolute left-[13px] top-[28px] bottom-0 w-px"
+                      style={{ backgroundColor: 'var(--color-border)' }}
+                    />
+                  )}
+
+                  {/* Version circle */}
+                  <div
+                    className="w-[27px] h-[27px] rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold z-10"
+                    style={{
+                      backgroundColor: i === 0
+                        ? 'var(--color-accent)'
+                        : 'color-mix(in srgb, var(--color-accent) 20%, transparent)',
+                      color: i === 0 ? '#fff' : 'var(--color-accent)',
+                    }}
+                  >
+                    V{versionNum}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0 pb-4">
+                    {/* Memory ID */}
+                    {entryId && (
+                      <div className="flex items-center gap-1 mb-1">
+                        <span
+                          className="text-[10px] font-mono truncate"
+                          style={{ color: 'var(--color-text-muted)', maxWidth: '200px' }}
+                        >
+                          {entryId}
+                        </span>
+                        <CopyButton text={entryId} />
+                      </div>
+                    )}
+
+                    {/* Memory text */}
+                    <p className="text-sm leading-relaxed mb-1" style={{ color: 'var(--color-text-primary)' }}>
+                      {memoryText}
+                    </p>
+
+                    {/* Timestamp */}
+                    {entry.created_at && (
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                        {t('memories.updated_at')}: {formatDateTime(entry.created_at)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
 }
@@ -500,7 +474,9 @@ function FeedbackTab({ memoryId, userId }: { memoryId: string; userId?: string }
 /* ------------------------------------------------------------------ */
 /*  Main Sidebar                                                       */
 /* ------------------------------------------------------------------ */
-export default function MemoryDetailSidebar({ memory, onClose, onDeleted, onReclassified }: MemoryDetailSidebarProps) {
+export default function MemoryDetailSidebar({
+  memory, onClose, onDeleted, onReclassified, onPrev, onNext,
+}: MemoryDetailSidebarProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabKey>('details');
@@ -531,13 +507,6 @@ export default function MemoryDetailSidebar({ memory, onClose, onDeleted, onRecl
     }
   };
 
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: 'details', label: t('memories.details_tab') },
-    { key: 'source', label: t('memories.source_tab') },
-    { key: 'history', label: t('memories.history_tab') },
-    { key: 'feedback', label: t('memories.feedback_tab') },
-  ];
-
   return (
     <>
       {/* Backdrop */}
@@ -549,48 +518,70 @@ export default function MemoryDetailSidebar({ memory, onClose, onDeleted, onRecl
 
       {/* Sidebar panel */}
       <div
-        className="fixed top-0 right-0 h-full w-[440px] z-50 flex flex-col shadow-xl"
-        style={{ backgroundColor: 'var(--color-bg-primary)', borderLeft: '1px solid var(--color-border)' }}
+        className="fixed top-0 right-0 h-full w-[720px] z-50 overflow-y-auto flex flex-col"
+        style={{
+          backgroundColor: 'var(--color-bg-secondary)',
+          borderLeft: '1px solid var(--color-border)',
+        }}
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between px-5 py-4 shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
+          className="sticky top-0 z-10 px-5 py-3"
+          style={{
+            backgroundColor: 'var(--color-bg-secondary)',
+            borderBottom: '1px solid var(--color-border)',
+          }}
         >
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-            {t('memories.detail')}
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg transition-colors cursor-pointer"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            <X size={18} />
-          </button>
-        </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+              {t('memories.detail')}
+            </span>
 
-        {/* Tabs */}
-        <div
-          className="flex shrink-0 px-5 gap-1"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              className="px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer"
-              style={{
-                color: activeTab === tab.key ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                borderBottom: activeTab === tab.key ? '2px solid var(--color-accent)' : '2px solid transparent',
-              }}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
+            {/* Right: nav arrows + close */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={onPrev}
+                disabled={!onPrev}
+                className="p-1 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                <ChevronUp size={16} />
+              </button>
+              <button
+                onClick={onNext}
+                disabled={!onNext}
+                className="p-1 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                <ChevronDown size={16} />
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1 rounded-lg transition-colors cursor-pointer ml-1"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-0 mt-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <TabButton
+              active={activeTab === 'details'}
+              onClick={() => setActiveTab('details')}
+              label={t('memories.details_tab')}
+            />
+            <TabButton
+              active={activeTab === 'source_updates'}
+              onClick={() => setActiveTab('source_updates')}
+              label={t('memories.source_updates_tab')}
+            />
+          </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto">
           {activeTab === 'details' && (
             <DetailsTab
               memory={memory}
@@ -600,9 +591,7 @@ export default function MemoryDetailSidebar({ memory, onClose, onDeleted, onRecl
               isReclassifying={isReclassifying}
             />
           )}
-          {activeTab === 'source' && <SourceTab memoryId={memory.id} />}
-          {activeTab === 'history' && <HistoryTab memoryId={memory.id} />}
-          {activeTab === 'feedback' && <FeedbackTab memoryId={memory.id} userId={memory.user_id} />}
+          {activeTab === 'source_updates' && <SourceUpdatesTab memoryId={memory.id} />}
         </div>
       </div>
     </>

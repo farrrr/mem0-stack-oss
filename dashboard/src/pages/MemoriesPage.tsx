@@ -3,19 +3,20 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Search, List, Clock, ChevronLeft, ChevronRight,
-  RefreshCw, Trash2, X,
+  RefreshCw, Trash2, X, User,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { DEFAULT_USER_ID } from '../lib/constants';
 import { useDebounce } from '../hooks/useDebounce';
+import { formatRelativeTime } from '../lib/utils';
 import type { Memory } from '../lib/types';
 import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
 import MemoryDetailSidebar from '../components/memory/MemoryDetailSidebar';
 import MemoryTimelineView from '../components/memory/MemoryTimelineView';
 
 const LIMIT = 35;
 const DATE_RANGE_OPTIONS = ['all', '1d', '7d', '30d'] as const;
-const CONFIDENCE_OPTIONS = ['', 'high', 'medium', 'low'] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -25,9 +26,14 @@ function truncate(text: string, maxLen: number): string {
   return text.slice(0, maxLen) + '...';
 }
 
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString();
+/** Count extra entities (agent_id, run_id, app_id) on a memory. */
+function getEntityInfo(mem: Memory): { userId: string; extraCount: number } {
+  const userId = mem.user_id || '-';
+  let extraCount = 0;
+  if (mem.agent_id) extraCount++;
+  if (mem.run_id) extraCount++;
+  if (mem.app_id) extraCount++;
+  return { userId, extraCount };
 }
 
 /* ------------------------------------------------------------------ */
@@ -40,7 +46,6 @@ export default function MemoriesPage() {
   // Filters
   const [userId, setUserId] = useState(DEFAULT_USER_ID);
   const [category, setCategory] = useState('');
-  const [confidence, setConfidence] = useState('');
   const [dateRange, setDateRange] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const [offset, setOffset] = useState(0);
@@ -74,7 +79,6 @@ export default function MemoriesPage() {
     offset,
     user_id: userId || undefined,
     category: category || undefined,
-    confidence: confidence || undefined,
     date_range: dateRange === 'all' ? undefined : dateRange,
     search: debouncedSearch || undefined,
   };
@@ -105,6 +109,13 @@ export default function MemoriesPage() {
   }, [memories]);
 
   const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  // Sidebar navigation
+  const detailIndex = detailMemory ? memories.findIndex((m) => m.id === detailMemory.id) : -1;
+  const handlePrev = detailIndex > 0 ? () => setDetailMemory(memories[detailIndex - 1]) : undefined;
+  const handleNext = detailIndex >= 0 && detailIndex < memories.length - 1
+    ? () => setDetailMemory(memories[detailIndex + 1])
+    : undefined;
 
   // Bulk actions
   const handleBulkReclassify = async () => {
@@ -225,23 +236,6 @@ export default function MemoriesPage() {
           ))}
         </select>
 
-        {/* Confidence */}
-        <select
-          className="px-3 py-1.5 rounded-lg text-sm"
-          style={{
-            backgroundColor: 'var(--color-bg-primary)',
-            color: 'var(--color-text-primary)',
-            border: '1px solid var(--color-border)',
-          }}
-          value={confidence}
-          onChange={(e) => { setConfidence(e.target.value); handleFilterChange(); }}
-        >
-          <option value="">{t('memories.filter_confidence')}</option>
-          {CONFIDENCE_OPTIONS.filter(Boolean).map((c) => (
-            <option key={c} value={c}>{t(`memories.confidence_${c}`)}</option>
-          ))}
-        </select>
-
         {/* Date range pills */}
         <div className="flex items-center gap-1">
           {DATE_RANGE_OPTIONS.map((opt) => (
@@ -320,90 +314,146 @@ export default function MemoriesPage() {
                     />
                   </th>
                   <th
+                    className="text-left text-xs font-medium px-3 py-2.5 w-28"
+                    style={{ color: 'var(--color-text-muted)' }}
+                  >
+                    {t('requests.time')}
+                  </th>
+                  <th
+                    className="text-left text-xs font-medium px-3 py-2.5 w-36"
+                    style={{ color: 'var(--color-text-muted)' }}
+                  >
+                    {t('requests.entities')}
+                  </th>
+                  <th
                     className="text-left text-xs font-medium px-3 py-2.5"
                     style={{ color: 'var(--color-text-muted)' }}
                   >
-                    {t('memories.memory_text')}
+                    {t('memories.memory_content')}
                   </th>
                   <th
-                    className="text-left text-xs font-medium px-3 py-2.5 w-28"
+                    className="text-left text-xs font-medium px-3 py-2.5 w-36"
                     style={{ color: 'var(--color-text-muted)' }}
                   >
-                    {t('memories.category')}
+                    {t('memories.categories')}
                   </th>
                   <th
-                    className="text-left text-xs font-medium px-3 py-2.5 w-24"
+                    className="text-left text-xs font-medium px-3 py-2.5 w-16"
                     style={{ color: 'var(--color-text-muted)' }}
                   >
-                    {t('memories.confidence')}
-                  </th>
-                  <th
-                    className="text-left text-xs font-medium px-3 py-2.5 w-28"
-                    style={{ color: 'var(--color-text-muted)' }}
-                  >
-                    {t('memories.created_at')}
+                    {t('memories.actions')}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {memories.map((mem) => (
-                  <tr
-                    key={mem.id}
-                    className="transition-colors cursor-pointer"
-                    style={{
-                      borderTop: '1px solid var(--color-border)',
-                      backgroundColor: selected.has(mem.id) ? 'var(--color-bg-hover)' : 'var(--color-bg-primary)',
-                    }}
-                    onClick={() => setDetailMemory(mem)}
-                    onMouseEnter={(e) => {
-                      if (!selected.has(mem.id)) {
-                        e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!selected.has(mem.id)) {
-                        e.currentTarget.style.backgroundColor = 'var(--color-bg-primary)';
-                      }
-                    }}
-                  >
-                    <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(mem.id)}
-                        onChange={() => toggleSelect(mem.id)}
-                        className="cursor-pointer"
-                      />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                        {truncate(mem.memory, 100)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-wrap gap-1">
-                        {mem.category?.map((cat) => (
-                          <span
-                            key={cat}
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                            style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
-                          >
-                            {cat}
+                {memories.map((mem) => {
+                  const { userId: entityUserId, extraCount } = getEntityInfo(mem);
+                  const firstCategory = mem.category?.[0];
+                  const extraCategories = (mem.category?.length || 0) - 1;
+
+                  return (
+                    <tr
+                      key={mem.id}
+                      className="transition-colors cursor-pointer"
+                      style={{
+                        borderTop: '1px solid var(--color-border)',
+                        backgroundColor: selected.has(mem.id) ? 'var(--color-bg-hover)' : 'var(--color-bg-primary)',
+                      }}
+                      onClick={() => setDetailMemory(mem)}
+                      onMouseEnter={(e) => {
+                        if (!selected.has(mem.id)) {
+                          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!selected.has(mem.id)) {
+                          e.currentTarget.style.backgroundColor = 'var(--color-bg-primary)';
+                        }
+                      }}
+                    >
+                      {/* Checkbox */}
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(mem.id)}
+                          onChange={() => toggleSelect(mem.id)}
+                          className="cursor-pointer"
+                        />
+                      </td>
+
+                      {/* Time */}
+                      <td className="px-3 py-2.5">
+                        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                          {mem.created_at ? formatRelativeTime(mem.created_at) : '-'}
+                        </span>
+                      </td>
+
+                      {/* Entities */}
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <User size={12} style={{ color: 'var(--color-text-muted)' }} />
+                          <span className="text-xs font-mono truncate max-w-[100px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {entityUserId}
                           </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {mem.confidence && (
-                        <ConfidenceBadgeInline confidence={mem.confidence} />
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                        {formatDate(mem.created_at)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                          {extraCount > 0 && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                              style={{
+                                backgroundColor: 'color-mix(in srgb, var(--color-accent) 15%, transparent)',
+                                color: 'var(--color-accent)',
+                              }}
+                            >
+                              +{extraCount}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Memory Content */}
+                      <td className="px-3 py-2.5">
+                        <span className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                          {truncate(mem.memory, 100)}
+                        </span>
+                      </td>
+
+                      {/* Categories */}
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1">
+                          {firstCategory && (
+                            <Badge label={firstCategory} color="blue" />
+                          )}
+                          {extraCategories > 0 && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                              style={{
+                                backgroundColor: 'color-mix(in srgb, var(--color-accent) 15%, transparent)',
+                                color: 'var(--color-accent)',
+                              }}
+                            >
+                              +{extraCategories}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="p-1 rounded transition-colors cursor-pointer"
+                          style={{ color: 'var(--color-text-muted)' }}
+                          title={t('common.delete')}
+                          onClick={async () => {
+                            if (!window.confirm(t('memories.delete_confirm'))) return;
+                            await api.deleteMemory(mem.id);
+                            queryClient.invalidateQueries({ queryKey: ['memories'] });
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -498,31 +548,10 @@ export default function MemoriesPage() {
           memory={detailMemory}
           onClose={() => setDetailMemory(null)}
           onDeleted={() => setDetailMemory(null)}
+          onPrev={handlePrev}
+          onNext={handleNext}
         />
       )}
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Inline confidence badge for table                                  */
-/* ------------------------------------------------------------------ */
-function ConfidenceBadgeInline({ confidence }: { confidence: string }) {
-  const { t } = useTranslation();
-  const colorMap: Record<string, { bg: string; text: string }> = {
-    high: { bg: 'var(--color-success)', text: 'var(--color-bg-primary)' },
-    medium: { bg: 'var(--color-warning)', text: 'var(--color-text-primary)' },
-    low: { bg: 'var(--color-danger)', text: 'var(--color-bg-primary)' },
-  };
-  const colors = colorMap[confidence] || { bg: 'var(--color-bg-tertiary)', text: 'var(--color-text-primary)' };
-  const labelKey = `memories.confidence_${confidence}` as const;
-
-  return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-      style={{ backgroundColor: colors.bg, color: colors.text }}
-    >
-      {t(labelKey)}
-    </span>
   );
 }

@@ -40,6 +40,7 @@ export interface Memory {
   user_id?: string;
   agent_id?: string;
   run_id?: string;
+  app_id?: string;
   created_at?: string;
   updated_at?: string;
   metadata?: Record<string, unknown>;
