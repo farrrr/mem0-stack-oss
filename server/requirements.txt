@@ -1,3 +1,4 @@
+# Core
 fastapi==0.115.8
 uvicorn==0.34.0
 pydantic==2.10.4
@@ -7,13 +8,20 @@ mem0ai>=0.1.48
 
 # Graph store
 falkordb>=1.0.0
+rank-bm25>=0.2.2
 
-# Classification verification (optional, only if VERIFY_PROVIDER=anthropic)
+# Classification verification (optional)
+# Install if VERIFY_PROVIDER=anthropic
 anthropic>=0.50.0
 
-# Reranker (optional, only if RERANKER_PROVIDER=huggingface)
-# transformers>=4.40.0
-# torch>=2.0.0
-
-# FalkorDB BM25 search
-rank-bm25>=0.2.2
+# Reranker — choose one:
+#
+# Option A: TEI (recommended) — no extra Python packages needed
+#   Set RERANKER_PROVIDER=tei and run TEI as a Docker container.
+#   See README.md for the docker run command.
+#
+# Option B: In-process HuggingFace — requires PyTorch (~2GB)
+#   Set RERANKER_PROVIDER=huggingface and uncomment below:
+#   pip install transformers torch
+#
+# Option C: Disabled — leave RERANKER_PROVIDER empty
