@@ -93,6 +93,7 @@ const memoryPlugin = {
         app_id: identity.app_id,
       };
       if (runId) opts.run_id = runId;
+      if (cfg.customInstructions) opts.custom_instructions = cfg.customInstructions;
       return opts;
     }
 

@@ -46,6 +46,8 @@ export interface AddOptions {
   app_id?: string;
   run_id?: string;
   metadata?: Record<string, unknown>;
+  custom_instructions?: string;
+  infer?: boolean;
 }
 
 export interface SearchOptions {

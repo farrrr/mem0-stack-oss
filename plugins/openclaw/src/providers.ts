@@ -94,6 +94,8 @@ export class Mem0HTTPProvider {
     if (options.app_id) body.app_id = options.app_id;
     if (options.run_id) body.run_id = options.run_id;
     if (options.metadata) body.metadata = options.metadata;
+    if (options.custom_instructions) body.prompt = options.custom_instructions;
+    if (options.infer !== undefined) body.infer = options.infer;
 
     const resp = await fetch(`${this.baseUrl}/memories`, {
       method: "POST",
@@ -120,6 +122,7 @@ export class Mem0HTTPProvider {
     if (options.run_id) body.run_id = options.run_id;
     if (options.threshold != null) body.threshold = options.threshold;
     if (options.filters) body.filters = options.filters;
+    if (options.reranking != null) body.rerank = options.reranking;
     // Note: app_id not sent to search - mem0 SDK doesn't support it
 
     const resp = await fetch(`${this.baseUrl}/search`, {
@@ -175,6 +178,7 @@ export class Mem0HTTPProvider {
     if (options.user_id) params.set("user_id", options.user_id);
     if (options.agent_id) params.set("agent_id", options.agent_id);
     if (options.run_id) params.set("run_id", options.run_id);
+    if (options.app_id) params.set("app_id", options.app_id);
 
     const resp = await fetch(`${this.baseUrl}/memories?${params}`, {
       headers: this.headers(),

@@ -706,6 +706,7 @@ class SearchRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
     limit: Optional[int] = Field(None, description="Maximum number of results to return.")
     threshold: Optional[float] = Field(None, description="Minimum similarity score for results.")
+    rerank: Optional[bool] = Field(None, description="Whether to apply reranker. Defaults to SDK setting.")
 
 
 class RecallRequest(BaseModel):
@@ -797,6 +798,7 @@ async def get_all_memories(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    app_id: Optional[str] = None,
     limit: int = Query(35, ge=1, le=500),
     offset: int = Query(0, ge=0),
     category: Optional[str] = None,
@@ -822,6 +824,9 @@ async def get_all_memories(
         if run_id:
             conds.append("payload->>'run_id' = %s")
             params.append(run_id)
+        if app_id:
+            conds.append("payload->'metadata'->>'app_id' = %s")
+            params.append(app_id)
         if category:
             conds.append("payload->'metadata'->>'category' = %s")
             params.append(category)
@@ -1076,14 +1081,13 @@ async def search_recall(
 
 class MemoryUpdate(BaseModel):
     data: str = Field(..., description="New memory content text.")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional metadata to update.")
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
 async def update_memory(memory_id: str, body: MemoryUpdate, mem0=Depends(get_mem0), _api_key: Optional[str] = Depends(verify_api_key)):
     """Update an existing memory with new content."""
     try:
-        return await mem0.update(memory_id=memory_id, data=body.data, metadata=body.metadata)
+        return await mem0.update(memory_id=memory_id, data=body.data)
     except Exception as e:
         logger.exception("Error in update_memory:")
         raise HTTPException(status_code=500, detail=str(e))
