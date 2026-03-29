@@ -25,6 +25,10 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your API keys and database credentials
 
+# Copy prompt templates
+for f in prompts/*.example; do cp "$f" "${f%.example}"; done
+# Optionally edit prompts/ files to customize extraction and classification
+
 # Start the server
 uvicorn main:app --host 0.0.0.0 --port 8090 --reload
 ```
@@ -57,13 +61,20 @@ See [`.env.example`](.env.example) for the complete reference with defaults and 
 
 ## Custom Prompts
 
-The `prompts/` directory contains customizable LLM templates:
+The `prompts/` directory contains `.example` template files. Copy them before first use:
 
-| File | Purpose | Placeholders |
-|------|---------|-------------|
-| `extraction.txt` | Fact extraction from conversations | `{date}` -- current date |
-| `classification.txt` | Memory classification | `{taxonomy}`, `{memory_text}` |
-| `taxonomy.json` | Category and subcategory definitions | -- |
+```bash
+for f in prompts/*.example; do cp "$f" "${f%.example}"; done
+```
+
+The active files (without `.example` suffix) are in `.gitignore`, so `git pull` will never overwrite your customizations.
+
+| Example File | Active File | Purpose | Placeholders |
+|-------------|-------------|---------|-------------|
+| `extraction.txt.example` | `extraction.txt` | Fact extraction from conversations | `{date}` -- current date |
+| `graph_extraction.txt.example` | `graph_extraction.txt` | Graph entity extraction | `{date}` -- current date |
+| `classification.txt.example` | `classification.txt` | Memory classification | `{taxonomy}`, `{memory_text}` |
+| `taxonomy.json.example` | `taxonomy.json` | Category and subcategory definitions | -- |
 
 To customize extraction behavior, edit `extraction.txt`. The `{date}` placeholder is replaced by the SDK at runtime.
 
@@ -83,8 +94,6 @@ volumes:
 |------|-------------|
 | `main.py` | FastAPI app -- all endpoints, classification pipeline, maintenance tools |
 | `.env.example` | Full environment variable reference |
-| `prompts/extraction.txt` | Customizable fact extraction prompt |
-| `prompts/classification.txt` | Customizable classification prompt |
-| `prompts/taxonomy.json` | Classification category definitions |
+| `prompts/*.example` | Prompt templates (copy to remove `.example` suffix before use) |
 | `requirements.txt` | Python dependencies |
 | `Dockerfile` | Production container image |

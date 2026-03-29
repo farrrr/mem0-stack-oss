@@ -122,6 +122,8 @@ if os.path.exists(CUSTOM_PROMPT_PATH):
     logger.info("Custom extraction prompt loaded from %s", CUSTOM_PROMPT_PATH)
 elif _is_custom_prompt_path:
     logger.warning("CUSTOM_PROMPT_PATH set to %s but file not found", CUSTOM_PROMPT_PATH)
+else:
+    logger.warning("%s not found — copy from %s.example to customize", CUSTOM_PROMPT_PATH, CUSTOM_PROMPT_PATH)
 
 # --- Custom graph extraction prompt ---
 GRAPH_CUSTOM_PROMPT_PATH = os.environ.get(
@@ -129,10 +131,15 @@ GRAPH_CUSTOM_PROMPT_PATH = os.environ.get(
     os.path.join(os.path.dirname(__file__), "prompts", "graph_extraction.txt"),
 )
 _GRAPH_EXTRACTION_PROMPT = ""
+_is_graph_custom_prompt_path = "GRAPH_CUSTOM_PROMPT_PATH" in os.environ
 if os.path.exists(GRAPH_CUSTOM_PROMPT_PATH):
     with open(GRAPH_CUSTOM_PROMPT_PATH) as _f:
         _GRAPH_EXTRACTION_PROMPT = _f.read().strip()
     logger.info("Custom graph extraction prompt loaded from %s", GRAPH_CUSTOM_PROMPT_PATH)
+elif _is_graph_custom_prompt_path:
+    logger.warning("GRAPH_CUSTOM_PROMPT_PATH set to %s but file not found", GRAPH_CUSTOM_PROMPT_PATH)
+else:
+    logger.warning("%s not found — copy from %s.example to customize", GRAPH_CUSTOM_PROMPT_PATH, GRAPH_CUSTOM_PROMPT_PATH)
 
 # --- Classification pipeline config ---
 CLASSIFY_ENABLED = os.environ.get("CLASSIFY_ENABLED", "true").lower() == "true"
@@ -166,10 +173,14 @@ if os.path.exists(_TAXONOMY_PATH):
             sub_str = ", ".join(f"{k} ({v})" for k, v in subs.items())
             lines.append(f"  {cat}: {sub_str}")
     _TAXONOMY_PROMPT = "\n".join(lines)
+else:
+    logger.warning("%s not found — copy from %s.example to customize", _TAXONOMY_PATH, _TAXONOMY_PATH)
 
 if os.path.exists(_CLASSIFY_PROMPT_PATH):
     with open(_CLASSIFY_PROMPT_PATH) as _f:
         _CLASSIFY_PROMPT_TEMPLATE = _f.read().strip()
+else:
+    logger.warning("%s not found — copy from %s.example to customize", _CLASSIFY_PROMPT_PATH, _CLASSIFY_PROMPT_PATH)
 
 # Lazy singleton for classification LLM client
 _classify_client = None

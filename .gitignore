@@ -8,3 +8,9 @@ dist/
 .venv/
 _notes/
 scripts/data/
+
+# User-customized prompts (copy from *.example)
+server/prompts/extraction.txt
+server/prompts/graph_extraction.txt
+server/prompts/classification.txt
+server/prompts/taxonomy.json

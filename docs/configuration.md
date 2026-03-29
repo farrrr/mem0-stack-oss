@@ -192,11 +192,22 @@ Docker Compose automatically maps these to the `POSTGRES_*` variables inside the
 
 ## Custom Prompts
 
-The `server/prompts/` directory contains customizable LLM prompt templates:
+The `server/prompts/` directory ships `.example` files. Copy them before first use:
+
+```bash
+cd server/prompts
+for f in *.example; do cp "$f" "${f%.example}"; done
+```
+
+The active files (without `.example` suffix) are in `.gitignore`, so `git pull` will never overwrite your customizations.
 
 ### `extraction.txt`
 
 Controls how facts are extracted from conversations. Supports the `{date}` placeholder, which is replaced with the current date at runtime by the SDK.
+
+### `graph_extraction.txt`
+
+Controls how entities and relationships are extracted for graph memory. Supports the `{date}` placeholder.
 
 ### `classification.txt`
 

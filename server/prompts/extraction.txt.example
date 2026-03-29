@@ -88,9 +88,17 @@ User: My sister Maria is getting married next month, so I'll be traveling to Bar
 Assistant: Congratulations to your sister!
 Output: {"facts": ["Sister named Maria is getting married next month", "Plans to travel to Barcelona next month for sister's wedding"]}
 
-User: 最近プロジェクトでTypeScriptからGoに移行することにした。ビルド時間が長すぎるのが主な理由。
-Assistant: Goはビルドが速いですからね。
-Output: {"facts": ["プロジェクトでTypeScriptからGoへの移行を決定、ビルド時間の長さが主な理由"]}
+User: 我最近把服務搬到 Hetzner 的機房，比之前用 AWS 便宜很多。
+Assistant: Hetzner 的性價比確實不錯，很多人都從大雲搬過去了。
+Output: {"facts": ["最近將服務從 AWS 遷移到 Hetzner，因為便宜很多"]}
+
+User: 我不太喜歡吃辣，但是麻婆豆腐例外。週末想去那間新開的拉麵店試試。
+Assistant: 好的，我記住了！那間拉麵店評價很好喔。
+Output: {"facts": ["不太吃辣，但麻婆豆腐除外", "週末想去新開的拉麵店試試"]}
+
+User: 我叫小明，目前在做 freelance 的 DevOps 工作，主要用 Terraform 和 Ansible。
+Assistant: Freelance DevOps 很有彈性！Terraform 跟 Ansible 是很好的組合。
+Output: {"facts": ["名字是小明", "從事 freelance DevOps 工作", "主要使用 Terraform 和 Ansible"]}
 
 User: You told me last time that I use PostgreSQL 16 with pgvector.
 Assistant: Yes, that's in my notes. Would you like to discuss your database setup?

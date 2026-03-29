@@ -107,7 +107,7 @@ This returns paginated results with metadata, classification, and timestamps.
 
 - **Secure the API**: Set `ADMIN_API_KEY` in your `.env` to require authentication on all endpoints.
 - **Enable the reranker**: Add `--profile gpu` to improve search quality. See [Configuration](configuration.md#reranker-optional).
-- **Customize extraction**: Edit `server/prompts/extraction.txt` to control what facts the LLM extracts.
+- **Customize extraction**: Copy `server/prompts/*.example` (remove `.example` suffix), then edit the prompt files. See [Configuration](configuration.md#custom-prompts).
 - **Deploy to production**: See [Deployment](deployment.md) for systemd, SSL, and backup instructions.
 - **Explore the API**: See [API Reference](api-reference.md) for every endpoint with curl examples.
 - **Connect an AI agent**: Install the [OpenClaw plugin](../plugins/openclaw/README.md) for automatic memory capture and recall.
