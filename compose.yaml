@@ -1,0 +1,118 @@
+##
+# mem0-stack-oss — unified Docker Compose stack
+#
+# Quick start:
+#   cp .env.example .env   # fill in OPENAI_API_KEY + PG_PASSWORD
+#   docker compose up -d
+#
+# Services:
+#   postgres   — pgvector for vector storage
+#   falkordb   — graph memory (Redis protocol)
+#   api        — FastAPI server (mem0 API)
+#   dashboard  — nginx serving React frontend + API proxy
+#
+# Optional:
+#   reranker   — TEI GPU reranker (enable via --profile gpu)
+#
+
+services:
+  # ─── PostgreSQL with pgvector ──────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB:-mem0}
+      POSTGRES_USER: ${PG_USER:-mem0}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${PG_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-mem0}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── FalkorDB (graph memory) ───────────────────────────────────
+  falkordb:
+    image: falkordb/falkordb:latest
+    restart: unless-stopped
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+    ports:
+      - "127.0.0.1:${FALKORDB_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── API server ────────────────────────────────────────────────
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Override hosts to use Docker service names
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${PG_DB:-mem0}
+      POSTGRES_USER: ${PG_USER:-mem0}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required}
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      HISTORY_DB_PATH: /app/data/history.db
+    volumes:
+      - api_history:/app/data
+      - ./server/prompts:/app/prompts:ro
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ─── Dashboard (nginx + React frontend) ────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${DASHBOARD_PORT:-8080}:80"
+    environment:
+      API_UPSTREAM: api:8000
+
+  # ─── TEI Reranker (optional, GPU) ──────────────────────────────
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.7
+    profiles: [gpu]
+    restart: unless-stopped
+    command: ["--model-id", "${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}", "--port", "80"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "127.0.0.1:${RERANKER_PORT:-8184}:80"
+
+volumes:
+  pgdata:
+  falkordb_data:
+  api_history:
