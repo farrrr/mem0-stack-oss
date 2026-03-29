@@ -1,14 +1,14 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Users, Bot, AppWindow, Play, Trash2, ExternalLink,
+  Users, Bot, AppWindow, Play, Trash2, RefreshCw,
   ChevronLeft, ChevronRight, Key, CheckCircle, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { api } from '../lib/api.ts';
 import { formatRelativeTime } from '../lib/utils.ts';
-import Card from '../components/ui/Card.tsx';
 import Button from '../components/ui/Button.tsx';
 import Modal from '../components/ui/Modal.tsx';
 import EmptyState from '../components/ui/EmptyState.tsx';
@@ -18,46 +18,61 @@ const PAGE_SIZE = 50;
 
 type EntityType = 'user' | 'agent' | 'app' | 'run';
 
-const tabConfig: Array<{ type: EntityType; labelKey: string; icon: LucideIcon }> = [
-  { type: 'user', labelKey: 'entities.tab_users', icon: Users },
-  { type: 'agent', labelKey: 'entities.tab_agents', icon: Bot },
-  { type: 'app', labelKey: 'entities.tab_apps', icon: AppWindow },
-  { type: 'run', labelKey: 'entities.tab_runs', icon: Play },
+const ENTITY_TYPES: EntityType[] = ['user', 'run', 'agent', 'app'];
+
+const entityConfig: Record<EntityType, { labelKey: string; icon: LucideIcon; paramKey: string }> = {
+  user: { labelKey: 'entities.tab_users', icon: Users, paramKey: 'user_id' },
+  run: { labelKey: 'entities.tab_runs', icon: Play, paramKey: 'run_id' },
+  agent: { labelKey: 'entities.tab_agents', icon: Bot, paramKey: 'agent_id' },
+  app: { labelKey: 'entities.tab_apps', icon: AppWindow, paramKey: 'app_id' },
+};
+
+type DateRange = '' | '1' | '7' | '30';
+const DATE_RANGES: { key: DateRange; labelKey: string }[] = [
+  { key: '', labelKey: 'entities.date_all' },
+  { key: '1', labelKey: 'entities.date_1d' },
+  { key: '7', labelKey: 'entities.date_7d' },
+  { key: '30', labelKey: 'entities.date_30d' },
 ];
 
 interface EntityItem {
   id: string;
   memory_count: number;
-  last_updated: string;
+  updated_at: string;
 }
 
 export default function EntitiesPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { hasMaintenanceKey, setMaintenanceKey } = useAuth();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<EntityType>('user');
+  const [dateRange, setDateRange] = useState<DateRange>('');
   const [offset, setOffset] = useState(0);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<EntityItem | null>(null);
   const [agentUserId, setAgentUserId] = useState('');
 
-  // If no maintenance key, show modal first time
+  const days = dateRange === '' ? undefined : Number(dateRange);
+
   const ensureKey = useCallback((): boolean => {
     if (hasMaintenanceKey) return true;
     setShowKeyModal(true);
     return false;
   }, [hasMaintenanceKey]);
 
+  const resetOffset = () => setOffset(0);
+
   const handleTabChange = (tab: EntityType) => {
     setActiveTab(tab);
-    setOffset(0);
+    resetOffset();
   };
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['entities', activeTab, offset],
-    queryFn: () => api.getEntitiesByType(activeTab, PAGE_SIZE, offset),
+    queryKey: ['entities', activeTab, offset, days],
+    queryFn: () => api.getEntitiesByType(activeTab, PAGE_SIZE, offset, days),
     enabled: hasMaintenanceKey,
     staleTime: 30_000,
   });
@@ -77,7 +92,8 @@ export default function EntitiesPage() {
     },
   });
 
-  const handleDelete = (entity: EntityItem) => {
+  const handleDelete = (e: React.MouseEvent, entity: EntityItem) => {
+    e.stopPropagation();
     if (!ensureKey()) return;
     setDeleteTarget(entity);
   };
@@ -91,6 +107,11 @@ export default function EntitiesPage() {
     });
   };
 
+  const handleRowClick = (entity: EntityItem) => {
+    const paramKey = entityConfig[activeTab].paramKey;
+    navigate(`/memories?${paramKey}=${encodeURIComponent(entity.id)}`);
+  };
+
   const handleKeySubmit = () => {
     if (keyInput.trim()) {
       setMaintenanceKey(keyInput.trim());
@@ -99,16 +120,17 @@ export default function EntitiesPage() {
     }
   };
 
+  const ActiveIcon = entityConfig[activeTab].icon;
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Header */}
+      {/* Header row: title + date range */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>
           {t('entities.title')}
         </h1>
-
-        {/* Key status */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Key status */}
           {hasMaintenanceKey ? (
             <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-success)' }}>
               <CheckCircle size={14} />
@@ -120,52 +142,57 @@ export default function EntitiesPage() {
               {t('entities.key_status_missing')}
             </div>
           )}
+          <ToggleGroup
+            options={DATE_RANGES.map((d) => ({ value: d.key, label: t(d.labelKey) }))}
+            value={dateRange}
+            onChange={(v) => { setDateRange(v as DateRange); resetOffset(); }}
+          />
+        </div>
+      </div>
+
+      {/* Entity type toggle + actions */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <ToggleGroup
+          options={ENTITY_TYPES.map((typ) => ({
+            value: typ,
+            label: t(entityConfig[typ].labelKey),
+          }))}
+          value={activeTab}
+          onChange={(v) => handleTabChange(v as EntityType)}
+        />
+
+        <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" icon={Key} onClick={() => setShowKeyModal(true)}>
             {t('entities.set_key')}
+          </Button>
+          <Button variant="ghost" size="sm" icon={RefreshCw} onClick={() => refetch()}>
+            {t('common.refresh')}
           </Button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div
-        className="flex gap-0 rounded-lg overflow-hidden"
-        style={{ border: '1px solid var(--color-border)' }}
-      >
-        {tabConfig.map(({ type, labelKey, icon: Icon }) => (
-          <button
-            key={type}
-            onClick={() => handleTabChange(type)}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer flex-1 justify-center"
-            style={{
-              backgroundColor: activeTab === type ? 'var(--color-bg-hover)' : 'var(--color-bg-secondary)',
-              color: activeTab === type ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-              borderRight: '1px solid var(--color-border)',
-            }}
-          >
-            <Icon size={15} />
-            {t(labelKey)}
-          </button>
-        ))}
-      </div>
-
       {/* Content */}
       {!hasMaintenanceKey && (
-        <Card>
-          <div className="flex flex-col items-center gap-4 py-8">
-            <Key size={32} style={{ color: 'var(--color-text-muted)' }} />
-            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              {t('maintenance.maintenance_key_required')}
-            </p>
-            <Button variant="primary" size="sm" icon={Key} onClick={() => setShowKeyModal(true)}>
-              {t('entities.set_key')}
-            </Button>
-          </div>
-        </Card>
+        <div
+          className="rounded-xl p-12 flex flex-col items-center gap-4"
+          style={{
+            backgroundColor: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          <Key size={32} style={{ color: 'var(--color-text-muted)' }} />
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            {t('maintenance.maintenance_key_required')}
+          </p>
+          <Button variant="primary" size="sm" icon={Key} onClick={() => setShowKeyModal(true)}>
+            {t('entities.set_key')}
+          </Button>
+        </div>
       )}
 
       {hasMaintenanceKey && isLoading && (
         <div className="flex flex-col gap-2">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
               className="h-12 rounded-lg animate-pulse"
@@ -219,37 +246,48 @@ export default function EntitiesPage() {
                 {entities.map((entity) => (
                   <tr
                     key={entity.id}
+                    className="cursor-pointer transition-colors"
                     style={{ borderTop: '1px solid var(--color-border)' }}
+                    onClick={() => handleRowClick(entity)}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
                   >
-                    <td
-                      className="px-4 py-3 font-mono text-xs"
-                      style={{ color: 'var(--color-text-primary)' }}
-                    >
-                      {entity.id}
-                    </td>
-                    <td className="px-4 py-3" style={{ color: 'var(--color-text-secondary)' }}>
-                      {entity.memory_count ?? '-'}
-                    </td>
-                    <td className="px-4 py-3" style={{ color: 'var(--color-text-muted)' }}>
-                      {entity.last_updated ? formatRelativeTime(entity.last_updated) : '-'}
-                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <a
-                          href={`/?${activeTab}_id=${entity.id}`}
-                          className="flex items-center gap-1 text-xs font-medium transition-colors"
-                          style={{ color: 'var(--color-accent)' }}
+                        <ActiveIcon size={14} style={{ color: 'var(--color-text-muted)' }} />
+                        <span
+                          className="font-mono text-xs font-medium"
+                          style={{ color: 'var(--color-text-primary)' }}
                         >
-                          <ExternalLink size={12} />
-                          {t('entities.view_memories')}
-                        </a>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={Trash2}
-                          onClick={() => handleDelete(entity)}
-                        />
+                          {entity.id}
+                        </span>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
+                        style={{
+                          backgroundColor: 'color-mix(in srgb, var(--color-accent) 15%, transparent)',
+                          color: 'var(--color-accent)',
+                        }}
+                      >
+                        {entity.memory_count ?? 0}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3" style={{ color: 'var(--color-text-muted)' }}>
+                      {entity.updated_at ? formatRelativeTime(entity.updated_at) : '-'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Trash2}
+                        onClick={(e) => handleDelete(e, entity)}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -368,3 +406,36 @@ export default function EntitiesPage() {
   );
 }
 
+// --- Toggle button group (same pattern as RequestsPage) ---
+function ToggleGroup({ options, value, onChange }: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div
+      className="inline-flex rounded-lg overflow-hidden"
+      style={{ border: '1px solid var(--color-border)' }}
+    >
+      {options.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className="px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
+            style={{
+              backgroundColor: active
+                ? 'color-mix(in srgb, var(--color-accent) 20%, transparent)'
+                : 'var(--color-bg-tertiary)',
+              color: active ? 'var(--color-accent)' : 'var(--color-text-muted)',
+              borderRight: '1px solid var(--color-border)',
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
