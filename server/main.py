@@ -123,6 +123,17 @@ if os.path.exists(CUSTOM_PROMPT_PATH):
 elif _is_custom_prompt_path:
     logger.warning("CUSTOM_PROMPT_PATH set to %s but file not found", CUSTOM_PROMPT_PATH)
 
+# --- Custom graph extraction prompt ---
+GRAPH_CUSTOM_PROMPT_PATH = os.environ.get(
+    "GRAPH_CUSTOM_PROMPT_PATH",
+    os.path.join(os.path.dirname(__file__), "prompts", "graph_extraction.txt"),
+)
+_GRAPH_EXTRACTION_PROMPT = ""
+if os.path.exists(GRAPH_CUSTOM_PROMPT_PATH):
+    with open(GRAPH_CUSTOM_PROMPT_PATH) as _f:
+        _GRAPH_EXTRACTION_PROMPT = _f.read().strip()
+    logger.info("Custom graph extraction prompt loaded from %s", GRAPH_CUSTOM_PROMPT_PATH)
+
 # --- Classification pipeline config ---
 CLASSIFY_ENABLED = os.environ.get("CLASSIFY_ENABLED", "true").lower() == "true"
 CLASSIFY_MODEL = os.environ.get("CLASSIFY_MODEL", LLM_MODEL)
@@ -236,6 +247,10 @@ def _build_graph_config() -> dict:
             "provider": FALLBACK_LLM_PROVIDER,
             "config": fallback_cfg,
         }
+
+    # Custom graph extraction prompt
+    if _GRAPH_EXTRACTION_PROMPT:
+        config["custom_prompt"] = _GRAPH_EXTRACTION_PROMPT
 
     return config
 
