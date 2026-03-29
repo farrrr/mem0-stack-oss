@@ -1,6 +1,6 @@
 # mem0-stack-oss
 
-Self-hosted memory API server for AI agents -- built on [mem0](https://github.com/mem0ai/mem0) with automatic classification, importance decay, semantic deduplication, and a React dashboard.
+Self-hosted memory API server for AI agents -- built on a [mem0 fork](https://github.com/farrrr/mem0) with automatic classification, importance decay, semantic deduplication, and a React dashboard.
 
 ## Features
 
@@ -185,4 +185,4 @@ mem0-stack-oss/
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 
-This project uses the [mem0](https://github.com/mem0ai/mem0) SDK as a library dependency, also licensed under Apache 2.0. See [NOTICE](NOTICE) for details.
+This project uses a [fork of mem0](https://github.com/farrrr/mem0) (upstream: [mem0ai/mem0](https://github.com/mem0ai/mem0)) as a library dependency, also licensed under Apache 2.0. The fork adds FalkorDB graph store, fallback LLM retry, TEI reranker, and extraction quality improvements. See [NOTICE](NOTICE) for details.
