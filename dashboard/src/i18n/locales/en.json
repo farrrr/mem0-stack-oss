@@ -10,6 +10,7 @@
     "requests": "Requests",
     "entities": "Entities",
     "maintenance": "Maintenance",
+    "graph": "Graph",
     "health": "Health",
     "logout": "Logout"
   },
@@ -215,7 +216,11 @@
     "set_key": "Set Key",
     "enter_key": "Enter Maintenance API Key",
     "key_placeholder": "MAINTENANCE_API_KEY",
-    "entity_id": "ID"
+    "entity_id": "ID",
+    "date_all": "All Time",
+    "date_1d": "1d",
+    "date_7d": "7d",
+    "date_30d": "30d"
   },
   "maintenance": {
     "title": "Maintenance",
@@ -261,6 +266,28 @@
     "response_time": "Response Time",
     "auto_refresh": "Auto-refreshes every 30s",
     "checking": "Checking..."
+  },
+  "graph": {
+    "title": "Graph Memory",
+    "reset": "Reset Graph",
+    "view_relations": "View Relations",
+    "total_nodes": "Total Nodes",
+    "total_relations": "Total Relations",
+    "top_node_types": "Top Node Types",
+    "top_rel_types": "Top Relationship Types",
+    "relations_title": "Relations ({{count}})",
+    "search_placeholder": "Search relations...",
+    "sort_source_asc": "Source Name A-Z",
+    "sort_source_desc": "Source Name Z-A",
+    "col_source": "Source",
+    "col_source_type": "Source Type",
+    "col_relationship": "Relationship",
+    "col_target": "Target",
+    "col_target_type": "Target Type",
+    "no_data": "No graph data available.",
+    "no_relations": "No relations found.",
+    "nodes_label": "nodes",
+    "links_label": "links"
   },
   "feedback": {
     "positive": "Positive",

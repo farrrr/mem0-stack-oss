@@ -10,6 +10,7 @@
     "requests": "請求",
     "entities": "實體",
     "maintenance": "維護",
+    "graph": "圖譜",
     "health": "健康",
     "logout": "登出"
   },
@@ -215,7 +216,11 @@
     "set_key": "設定金鑰",
     "enter_key": "輸入維護 API 金鑰",
     "key_placeholder": "MAINTENANCE_API_KEY",
-    "entity_id": "ID"
+    "entity_id": "ID",
+    "date_all": "全部時間",
+    "date_1d": "1 天",
+    "date_7d": "7 天",
+    "date_30d": "30 天"
   },
   "maintenance": {
     "title": "維護",
@@ -261,6 +266,28 @@
     "response_time": "回應時間",
     "auto_refresh": "每 30 秒自動重新整理",
     "checking": "檢查中..."
+  },
+  "graph": {
+    "title": "圖譜記憶",
+    "reset": "重設圖譜",
+    "view_relations": "檢視關係",
+    "total_nodes": "節點總數",
+    "total_relations": "關係總數",
+    "top_node_types": "節點類型排行",
+    "top_rel_types": "關係類型排行",
+    "relations_title": "關係 ({{count}})",
+    "search_placeholder": "搜尋關係...",
+    "sort_source_asc": "來源名稱 A-Z",
+    "sort_source_desc": "來源名稱 Z-A",
+    "col_source": "來源",
+    "col_source_type": "來源類型",
+    "col_relationship": "關係",
+    "col_target": "目標",
+    "col_target_type": "目標類型",
+    "no_data": "無圖譜資料。",
+    "no_relations": "找不到關係。",
+    "nodes_label": "個節點",
+    "links_label": "條連結"
   },
   "feedback": {
     "positive": "正面",
