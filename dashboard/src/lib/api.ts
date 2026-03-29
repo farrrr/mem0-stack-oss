@@ -136,10 +136,11 @@ export const api = {
   getDailyStats: (days = 30) => request<{ stats: unknown[] }>(`/requests/daily-stats?days=${days}`),
 
   // Entities
-  getEntitiesByType: (type: string, limit = 50, offset = 0) =>
-    maintenanceRequest<{ entities: unknown[]; total: number }>(
-      `/entities/by-type?entity_type=${type}&limit=${limit}&offset=${offset}`
-    ),
+  getEntitiesByType: (type: string, limit = 50, offset = 0, days?: number) => {
+    let url = `/entities/by-type?entity_type=${type}&limit=${limit}&offset=${offset}`;
+    if (days != null) url += `&days=${days}`;
+    return maintenanceRequest<{ entities: unknown[]; total: number }>(url);
+  },
   getEntityUsers: () => maintenanceRequest<{ users: unknown[] }>('/entities/users'),
   getEntities: (userId: string) => request<Record<string, unknown>>(`/entities?user_id=${userId}`),
   deleteEntity: (type: string, id: string, confirm = true, userId?: string) => {
@@ -155,6 +156,21 @@ export const api = {
     maintenanceRequest(`/maintenance/dedup?user_id=${userId}&dry_run=${dryRun}&threshold=${threshold}`, { method: 'POST' }),
   cleanupExpired: (userId: string, dryRun = true) =>
     maintenanceRequest(`/maintenance/cleanup-expired?user_id=${userId}&dry_run=${dryRun}`, { method: 'POST' }),
+
+  // Graph
+  graphStats: (userId: string) =>
+    request<{ node_count: number; relationship_count: number; node_types: { type: string; count: number }[]; relationship_types: { type: string; count: number }[] }>(
+      `/graph/stats?user_id=${userId}`,
+    ),
+  graphRelations: (userId: string, limit = 50, offset = 0, search?: string) => {
+    let url = `/graph/relations?user_id=${userId}&limit=${limit}&offset=${offset}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    return request<{ relations: { source: string; source_type: string; relationship: string; target: string; target_type: string }[]; total: number }>(url);
+  },
+  graphNeighbors: (userId: string, nodeName: string) =>
+    request<{ node: string; neighbors: { name: string; type: string; relationship: string; direction: 'outgoing' | 'incoming' }[] }>(
+      `/graph/neighbors?user_id=${userId}&node_name=${encodeURIComponent(nodeName)}`,
+    ),
 
   // Configure
   configure: (config: Record<string, unknown>) =>

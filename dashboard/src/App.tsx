@@ -11,6 +11,7 @@ import StatsPage from './pages/StatsPage';
 import RequestsPage from './pages/RequestsPage';
 import EntitiesPage from './pages/EntitiesPage';
 import MaintenancePage from './pages/MaintenancePage';
+import GraphPage from './pages/GraphPage';
 import HealthPage from './pages/HealthPage';
 
 const queryClient = new QueryClient({
@@ -39,6 +40,7 @@ export default function App() {
                 <Route path="search" element={<SearchPage />} />
                 <Route path="stats" element={<StatsPage />} />
                 <Route path="requests" element={<RequestsPage />} />
+                <Route path="graph" element={<GraphPage />} />
                 <Route path="entities" element={<EntitiesPage />} />
                 <Route path="maintenance" element={<MaintenancePage />} />
                 <Route path="health" element={<HealthPage />} />

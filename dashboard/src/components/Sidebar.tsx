@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard, Brain, Search, BarChart3, ScrollText, Users, Wrench, Activity,
-  Sun, Moon, Monitor, LogOut, Globe,
+  GitFork, Sun, Moon, Monitor, LogOut, Globe,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/search', icon: Search, labelKey: 'nav.search' },
   { to: '/stats', icon: BarChart3, labelKey: 'nav.stats' },
   { to: '/requests', icon: ScrollText, labelKey: 'nav.requests' },
+  { to: '/graph', icon: GitFork, labelKey: 'nav.graph' },
   { to: '/entities', icon: Users, labelKey: 'nav.entities' },
   { to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance' },
   { to: '/health', icon: Activity, labelKey: 'nav.health' },
