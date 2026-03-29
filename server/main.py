@@ -634,6 +634,17 @@ async def lifespan(app: FastAPI):
             """)
     logger.info("Extension tables ready.")
 
+    # Set FalkorDB graph query timeout (persists until container restart)
+    if GRAPH_PROVIDER == "falkordb":
+        try:
+            import redis as _redis
+            r = _redis.Redis(host=FALKORDB_HOST, port=FALKORDB_PORT)
+            r.execute_command("GRAPH.CONFIG", "SET", "TIMEOUT", "10000")
+            r.close()
+            logger.info("FalkorDB GRAPH.CONFIG TIMEOUT set to 10000ms")
+        except Exception as e:
+            logger.warning("Failed to set FalkorDB timeout: %s", e)
+
     # Pre-initialize classification client to avoid thread-safety issues
     if CLASSIFY_ENABLED and CLASSIFY_API_KEY:
         _get_classify_client()
@@ -1947,6 +1958,210 @@ async def get_stats(
         }
     except Exception as e:
         logger.exception("Error in get_stats:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Graph memory endpoints ---
+
+def _get_falkordb_conn():
+    """Create a Redis connection for FalkorDB graph queries."""
+    import redis
+    return redis.Redis(host=FALKORDB_HOST, port=FALKORDB_PORT, decode_responses=True)
+
+
+def _graph_query(user_id: str, cypher: str):
+    """Execute a FalkorDB GRAPH.QUERY and return parsed results.
+
+    FalkorDB returns: [[headers], [[row1], [row2], ...], [stats]]
+    Returns list of dicts keyed by header names.
+    """
+    r = _get_falkordb_conn()
+    try:
+        raw = r.execute_command("GRAPH.QUERY", f"mem0_{user_id}", cypher)
+        if not raw or len(raw) < 2:
+            return []
+        headers = [h.decode() if isinstance(h, bytes) else h for h in raw[0]]
+        rows = raw[1] if len(raw) > 1 else []
+        result = []
+        for row in rows:
+            record = {}
+            for i, h in enumerate(headers):
+                val = row[i]
+                if isinstance(val, bytes):
+                    val = val.decode()
+                record[h] = val
+            result.append(record)
+        return result
+    finally:
+        r.close()
+
+
+def _graph_query_scalar(user_id: str, cypher: str):
+    """Execute a FalkorDB query and return the single scalar result."""
+    rows = _graph_query(user_id, cypher)
+    if rows:
+        first_val = list(rows[0].values())[0]
+        return first_val
+    return 0
+
+
+_graph_stats_cache: Dict[str, Any] = {}
+_graph_stats_cache_time: Dict[str, float] = {}
+GRAPH_STATS_CACHE_TTL = 300  # 5 minutes
+
+@app.get("/graph/stats", summary="Graph memory statistics")
+async def graph_stats(
+    user_id: str = Query(...),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Return graph memory statistics for a user (cached 5 min)."""
+    now = time.time()
+    if user_id in _graph_stats_cache and now - _graph_stats_cache_time.get(user_id, 0) < GRAPH_STATS_CACHE_TTL:
+        return _graph_stats_cache[user_id]
+
+    try:
+        graph_name = f"mem0_{user_id}"
+
+        # Run all 4 queries in parallel
+        node_count_f = asyncio.to_thread(
+            _graph_query_scalar, user_id, "MATCH (n) RETURN count(n) AS cnt"
+        )
+        rel_count_f = asyncio.to_thread(
+            _graph_query_scalar, user_id, "MATCH ()-[r]->() RETURN count(r) AS cnt"
+        )
+        node_types_f = asyncio.to_thread(
+            _graph_query, user_id,
+            "MATCH (n) WHERE NOT '__User__' IN labels(n) "
+            "RETURN [l IN labels(n) WHERE l <> '__Entity__'][0] AS type, count(n) AS count "
+            "ORDER BY count DESC LIMIT 30"
+        )
+        # rel_types aggregation is slow (~4s), skip for now — return empty
+        # rel_types_f = asyncio.to_thread(...)
+
+        node_count, rel_count, node_types = await asyncio.gather(
+            node_count_f, rel_count_f, node_types_f,
+        )
+
+        result = {
+            "user_id": user_id,
+            "graph_name": graph_name,
+            "node_count": node_count,
+            "relationship_count": rel_count,
+            "node_types": node_types,
+            "relationship_types": [],
+        }
+
+        # Fetch rel_types in background (slow query, don't block response)
+        async def _fetch_rel_types():
+            try:
+                rel_types = await asyncio.to_thread(
+                    _graph_query, user_id,
+                    "MATCH ()-[r]->() RETURN type(r) AS type, count(r) AS count "
+                    "ORDER BY count DESC LIMIT 30"
+                )
+                result["relationship_types"] = rel_types
+                _graph_stats_cache[user_id] = result
+                _graph_stats_cache_time[user_id] = time.time()
+            except Exception:
+                pass
+
+        _graph_stats_cache[user_id] = result
+        _graph_stats_cache_time[user_id] = now
+        asyncio.create_task(_fetch_rel_types())
+
+        return result
+    except Exception as e:
+        logger.exception("Error in graph_stats:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/relations", summary="List graph relations")
+async def graph_relations(
+    user_id: str = Query(...),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    search: Optional[str] = Query(None),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """List graph relations with pagination and optional search."""
+    try:
+        # Build WHERE clause — FalkorDB doesn't handle parameterized CONTAINS well
+        where_clause = ""
+        if search:
+            safe_search = search.replace("\\", "\\\\").replace("'", "\\'")
+            where_clause = (
+                f"WHERE s.name CONTAINS '{safe_search}' "
+                f"OR t.name CONTAINS '{safe_search}' "
+            )
+
+        data_query = (
+            f"MATCH (s)-[r]->(t) {where_clause}"
+            f"RETURN s.name AS source, "
+            f"[l IN labels(s) WHERE l <> '__Entity__' AND l <> '__User__'][0] AS source_type, "
+            f"type(r) AS relationship, "
+            f"t.name AS target, "
+            f"[l IN labels(t) WHERE l <> '__Entity__' AND l <> '__User__'][0] AS target_type "
+            f"SKIP {offset} LIMIT {limit}"
+        )
+        count_query = (
+            f"MATCH (s)-[r]->(t) {where_clause}"
+            f"RETURN count(r) AS cnt"
+        )
+
+        relations, total = await asyncio.gather(
+            asyncio.to_thread(_graph_query, user_id, data_query),
+            asyncio.to_thread(_graph_query_scalar, user_id, count_query),
+        )
+
+        return {
+            "relations": relations,
+            "total": total,
+        }
+    except Exception as e:
+        logger.exception("Error in graph_relations:")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/neighbors", summary="Get node neighbors")
+async def graph_neighbors(
+    user_id: str = Query(...),
+    node_name: str = Query(...),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Get all neighbors of a specific node for graph visualization."""
+    try:
+        safe_name = node_name.replace("\\", "\\\\").replace("'", "\\'")
+
+        outgoing_query = (
+            f"MATCH (s {{name: '{safe_name}'}})-[r]->(t) "
+            f"RETURN t.name AS name, "
+            f"[l IN labels(t) WHERE l <> '__Entity__' AND l <> '__User__'][0] AS type, "
+            f"type(r) AS relationship"
+        )
+        incoming_query = (
+            f"MATCH (s)-[r]->(t {{name: '{safe_name}'}}) "
+            f"RETURN s.name AS name, "
+            f"[l IN labels(s) WHERE l <> '__Entity__' AND l <> '__User__'][0] AS type, "
+            f"type(r) AS relationship"
+        )
+
+        outgoing, incoming = await asyncio.gather(
+            asyncio.to_thread(_graph_query, user_id, outgoing_query),
+            asyncio.to_thread(_graph_query, user_id, incoming_query),
+        )
+
+        neighbors = []
+        for row in outgoing:
+            neighbors.append({**row, "direction": "outgoing"})
+        for row in incoming:
+            neighbors.append({**row, "direction": "incoming"})
+
+        return {
+            "node": node_name,
+            "neighbors": neighbors,
+        }
+    except Exception as e:
+        logger.exception("Error in graph_neighbors:")
         raise HTTPException(status_code=500, detail=str(e))
 
 
