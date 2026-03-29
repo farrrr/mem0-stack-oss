@@ -38,6 +38,13 @@ services:
   falkordb:
     image: falkordb/falkordb:latest
     restart: unless-stopped
+    command: >
+      redis-server
+      --loadmodule /var/lib/falkordb/bin/falkordb.so
+      --appendonly yes
+      --appendfsync everysec
+      --save "60 1"
+      --save "300 100"
     volumes:
       - falkordb_data:/var/lib/falkordb/data
     ports:
