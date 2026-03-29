@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -42,12 +43,15 @@ function getEntityInfo(mem: Memory): { userId: string; extraCount: number } {
 export default function MemoriesPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
 
-  // Filters
-  const [userId, setUserId] = useState(DEFAULT_USER_ID);
-  const [category, setCategory] = useState('');
+  // Filters — initialize from URL params if present
+  const [userId, setUserId] = useState(searchParams.get('user_id') || DEFAULT_USER_ID);
+  const [agentId, _setAgentId] = useState(searchParams.get('agent_id') || '');
+  const [runId, _setRunId] = useState(searchParams.get('run_id') || '');
+  const [category, setCategory] = useState(searchParams.get('category') || '');
   const [dateRange, setDateRange] = useState<string>('all');
-  const [searchText, setSearchText] = useState('');
+  const [searchText, setSearchText] = useState(searchParams.get('search') || '');
   const [offset, setOffset] = useState(0);
 
   // View mode
@@ -78,6 +82,8 @@ export default function MemoriesPage() {
     limit: LIMIT,
     offset,
     user_id: userId || undefined,
+    agent_id: agentId || undefined,
+    run_id: runId || undefined,
     category: category || undefined,
     date_range: dateRange === 'all' ? undefined : dateRange,
     search: debouncedSearch || undefined,
