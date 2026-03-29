@@ -1,0 +1,9 @@
+mem0-stack-oss
+Copyright 2026 Far (https://github.com/farrrr)
+
+This project uses the mem0 SDK (https://github.com/mem0ai/mem0),
+licensed under the Apache License, Version 2.0.
+
+The mem0 SDK is used as a library dependency (pip install mem0ai).
+No source code from the mem0 repository is copied into this project.
+The server (server/main.py) and dashboard (dashboard/) are original works.
