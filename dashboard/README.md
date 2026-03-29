@@ -1,73 +1,114 @@
-# React + TypeScript + Vite
+# mem0-stack-oss Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React web UI for managing and visualizing memories. Communicates with the mem0-stack-oss API server via `/api/*` reverse proxy.
 
-Currently, two official plugins are available:
+## Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Technology | Purpose |
+|-----------|---------|
+| React 19 | UI framework |
+| TypeScript | Type safety |
+| Vite 8 | Build tool and dev server |
+| Tailwind CSS 4 | Styling |
+| TanStack Query 5 | Data fetching and caching |
+| react-router-dom 7 | Client-side routing |
+| react-force-graph-2d | Graph visualization |
+| react-i18next + i18next | Internationalization |
+| Lucide React | Icons |
 
-## React Compiler
+## Development Setup
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Prerequisites
 
-## Expanding the ESLint configuration
+- Node.js 22+
+- The mem0-stack-oss API server running on port 8090
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Install and run
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The dev server starts on `http://localhost:5173`. Vite proxies `/api/*` requests to `http://localhost:8090` (configured in `vite.config.ts`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Build for production
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build
+```
+
+Output goes to `dist/`. Serve these files with any static file server (nginx, Caddy, etc.).
+
+### Type check and lint
+
+```bash
+npx tsc -b          # Type check
+npm run lint         # ESLint
+```
+
+## Pages
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Dashboard | `/` | Overview with memory stats, activity charts, and category distribution |
+| Memories | `/memories` | Memory browser with pagination, filtering by category/confidence/date, and text search |
+| Search | `/search` | Interactive memory search with similarity scores |
+| Entities | `/entities` | User and agent entity management with memory counts |
+| Graph | `/graph` | Force-directed graph visualization of entity relationships |
+| Stats | `/stats` | Detailed system statistics per user |
+| Requests | `/requests` | API request audit log with filters |
+| Maintenance | `/maintenance` | Decay, dedup, and cleanup tools with dry-run preview |
+| Health | `/health` | Service health status checks |
+| Login | `/login` | API key authentication |
+
+## Internationalization (i18n)
+
+The dashboard supports three languages:
+
+| Language | File |
+|----------|------|
+| English | `src/pages/locales/en.json` |
+| Traditional Chinese (zh-TW) | `src/pages/locales/zh-TW.json` |
+| Simplified Chinese (zh-CN) | `src/pages/locales/zh-CN.json` |
+
+Language detection is automatic based on browser locale. You can switch languages from the UI.
+
+To add a new language, create a new JSON file in `src/pages/locales/` following the structure of `en.json`.
+
+## API Proxy
+
+In development, Vite proxies `/api/*` to `http://localhost:8090` with prefix stripping (a request to `/api/health` becomes `/health` on the server).
+
+In production (Docker), nginx handles the same proxy. See `Dockerfile` for the nginx template.
+
+## Docker
+
+The `Dockerfile` uses a multi-stage build:
+
+1. **Build stage**: Node.js 22 Alpine -- `npm ci` + `npm run build`
+2. **Serve stage**: nginx Alpine -- serves `dist/` with SPA fallback and API proxy
+
+The `API_UPSTREAM` environment variable controls where nginx proxies `/api/*` requests. Docker Compose sets this to `api:8000`.
+
+## Project Structure
+
+```
+dashboard/
+├── src/
+│   ├── pages/           # Page components (one per route)
+│   │   ├── locales/     # i18n translation files
+│   │   └── *.tsx        # Page components
+│   ├── components/      # Shared UI components
+│   ├── contexts/        # React contexts
+│   ├── hooks/           # Custom hooks
+│   ├── lib/             # API client, types, utilities
+│   ├── App.tsx          # Router and layout
+│   ├── main.tsx         # Entry point
+│   └── index.css        # Global styles (Tailwind)
+├── public/              # Static assets
+├── Dockerfile           # Multi-stage build
+├── vite.config.ts       # Vite config with API proxy
+├── tsconfig.json        # TypeScript config
+└── package.json
 ```

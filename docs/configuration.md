@@ -1,151 +1,213 @@
 # Configuration Reference
 
-All configuration is via environment variables in `server/.env`. Copy from `.env.example` to get started:
+All configuration is via environment variables. When you use Docker Compose, set them in the root `.env` file. For standalone server deployments, use `server/.env`.
 
 ```bash
-cp server/.env.example server/.env
+cp .env.example .env
+# Edit .env with your values
 ```
 
-## Environment Variables
-
-### LLM (Fact Extraction)
-
-Any OpenAI-compatible endpoint works (OpenAI, Cerebras, Together, Groq, etc.).
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_PROVIDER` | `openai` | LLM provider name |
-| `LLM_MODEL` | `gpt-4.1-nano-2025-04-14` | Model for fact extraction |
-| `LLM_API_KEY` | *(empty)* | API key (falls back to `OPENAI_API_KEY`) |
-| `LLM_BASE_URL` | *(empty)* | Custom endpoint URL (e.g. `https://api.cerebras.ai/v1`) |
-| `LLM_TEMPERATURE` | `0.2` | Sampling temperature |
-| `LLM_MAX_TOKENS` | `8192` | Maximum output tokens |
-
-### Embedder
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `EMBEDDER_PROVIDER` | `openai` | Embedding provider |
-| `EMBEDDER_MODEL` | `text-embedding-3-small` | Embedding model |
-| `EMBEDDER_DIMS` | `1536` | Embedding dimensions |
-| `EMBEDDER_API_KEY` | *(empty)* | API key (falls back to `OPENAI_API_KEY`) |
-
-### Reranker (Optional)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RERANKER_PROVIDER` | *(empty)* | `tei`, `huggingface`, or empty to disable |
-| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model name |
-| `RERANKER_TOP_K` | `5` | Number of results after reranking |
-| `RERANKER_BASE_URL` | `http://localhost:8184` | TEI endpoint (when provider=tei) |
-| `RERANKER_TIMEOUT` | `10` | HTTP timeout in seconds (TEI mode) |
-| `RERANKER_DEVICE` | `cpu` | Device for in-process mode (`cpu` or `cuda`) |
-
-### Graph Store
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GRAPH_PROVIDER` | `falkordb` | `falkordb` or `neo4j` |
-| `FALKORDB_HOST` | `localhost` | FalkorDB host |
-| `FALKORDB_PORT` | `6379` | FalkorDB port |
-| `FALKORDB_DATABASE` | `mem0` | FalkorDB database name |
-| `NEO4J_URI` | `bolt://neo4j:7687` | Neo4j connection URI |
-| `NEO4J_USERNAME` | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | `mem0graph` | Neo4j password |
-
-### Graph LLM (Optional)
-
-Separate LLM for graph operations. Falls back to the main LLM settings if not set.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GRAPH_LLM_PROVIDER` | *(main LLM)* | Provider for graph LLM |
-| `GRAPH_LLM_MODEL` | *(main LLM)* | Model for graph LLM |
-| `GRAPH_LLM_API_KEY` | *(main LLM)* | API key for graph LLM |
-| `GRAPH_LLM_BASE_URL` | *(main LLM)* | Endpoint for graph LLM |
-
-### Fallback LLM (Optional)
-
-Used when the primary LLM fails.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FALLBACK_LLM_MODEL` | *(empty)* | Fallback model name |
-| `FALLBACK_LLM_API_KEY` | *(empty)* | Fallback API key (falls back to `OPENAI_API_KEY`) |
-
-### PostgreSQL (pgvector)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_HOST` | `postgres` | PostgreSQL host |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_DB` | `postgres` | Database name |
-| `POSTGRES_USER` | `postgres` | Database user |
-| `POSTGRES_PASSWORD` | `postgres` | Database password |
-| `POSTGRES_COLLECTION_NAME` | `memories` | Table/collection name for memories |
-| `PG_POOL_MIN` | `2` | Minimum connection pool size |
-| `PG_POOL_MAX` | `80` | Maximum connection pool size |
-
-### Classification Pipeline
-
-Runs as a background task after each memory addition.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLASSIFY_ENABLED` | `true` | Enable/disable classification |
-| `CLASSIFY_MODEL` | *(main LLM)* | Model for classification |
-| `CLASSIFY_API_KEY` | *(main LLM)* | API key for classification |
-| `CLASSIFY_BASE_URL` | *(main LLM)* | Endpoint for classification |
-
-### Verification (Optional)
-
-Optional second LLM pass to verify classification results.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VERIFY_ENABLED` | `false` | Enable verification step |
-| `VERIFY_PROVIDER` | `openai` | `openai` or `anthropic` |
-| `VERIFY_MODEL` | *(empty)* | Model for verification |
-| `VERIFY_API_KEY` | *(empty)* | API key for verification |
-
-### Auth
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ADMIN_API_KEY` | *(empty)* | API key for all endpoints (empty = no auth) |
-| `MAINTENANCE_API_KEY` | *(empty)* | API key for maintenance endpoints |
-
-When `ADMIN_API_KEY` is set, all requests must include the `Authorization: Bearer <key>` header. Minimum recommended length is 16 characters.
-
-### History
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HISTORY_DB_PATH` | `/app/history/history.db` | Path for the SQLite history database |
-
-### Legacy
+## Required Variables
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Fallback for `LLM_API_KEY` and `EMBEDDER_API_KEY` |
+| `OPENAI_API_KEY` | API key for LLM and embeddings. Used as fallback when `LLM_API_KEY` or `EMBEDDER_API_KEY` are not set. |
+| `PG_PASSWORD` | PostgreSQL password (Docker Compose only). |
+
+## LLM (Fact Extraction)
+
+Any OpenAI-compatible endpoint works (OpenAI, Cerebras, Together, Groq, etc.).
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `LLM_PROVIDER` | string | `openai` | LLM provider name. |
+| `LLM_MODEL` | string | `gpt-4.1-nano-2025-04-14` | Model for fact extraction and memory actions. |
+| `LLM_API_KEY` | string | *(falls back to `OPENAI_API_KEY`)* | API key for the LLM provider. |
+| `LLM_BASE_URL` | string | *(empty)* | Custom endpoint URL. Set for non-OpenAI providers (e.g. `https://api.cerebras.ai/v1`). |
+| `LLM_TEMPERATURE` | float | `0.2` | Sampling temperature. |
+| `LLM_MAX_TOKENS` | int | `8192` | Maximum output tokens. |
+
+## Embedder
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `EMBEDDER_PROVIDER` | string | `openai` | Embedding provider. |
+| `EMBEDDER_MODEL` | string | `text-embedding-3-small` | Embedding model name. |
+| `EMBEDDER_DIMS` | int | `1536` | Embedding vector dimensions. Must match the model. |
+| `EMBEDDER_API_KEY` | string | *(falls back to `OPENAI_API_KEY`)* | API key for embeddings. |
+
+## Graph Store
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `GRAPH_PROVIDER` | string | `falkordb` | Graph backend: `falkordb` or `neo4j`. |
+| `FALKORDB_HOST` | string | `localhost` | FalkorDB host. Docker Compose overrides this to `falkordb`. |
+| `FALKORDB_PORT` | int | `6379` | FalkorDB port. |
+| `FALKORDB_DATABASE` | string | `mem0` | FalkorDB database name. |
+| `NEO4J_URI` | string | `bolt://neo4j:7687` | Neo4j Bolt connection URI. |
+| `NEO4J_USERNAME` | string | `neo4j` | Neo4j username. |
+| `NEO4J_PASSWORD` | string | `mem0graph` | Neo4j password. |
+
+## Graph LLM (Optional)
+
+A separate LLM for graph entity extraction. Falls back to the main LLM settings when not set.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `GRAPH_LLM_PROVIDER` | string | *(main LLM)* | Provider for graph LLM. |
+| `GRAPH_LLM_MODEL` | string | *(main LLM)* | Model for graph LLM. |
+| `GRAPH_LLM_API_KEY` | string | *(main LLM)* | API key for graph LLM. |
+| `GRAPH_LLM_BASE_URL` | string | *(main LLM)* | Endpoint for graph LLM. |
+
+## Fallback LLM (Optional)
+
+Used when the primary LLM fails (e.g., rate limits, timeouts).
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `FALLBACK_LLM_PROVIDER` | string | `openai` | Fallback provider name. |
+| `FALLBACK_LLM_MODEL` | string | *(empty)* | Fallback model name. Leave empty to disable. |
+| `FALLBACK_LLM_API_KEY` | string | *(falls back to `OPENAI_API_KEY`)* | Fallback API key. |
+| `FALLBACK_LLM_BASE_URL` | string | *(empty)* | Fallback endpoint URL. |
+
+## Reranker (Optional)
+
+Improves search quality by rescoring results with a cross-encoder model.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `RERANKER_PROVIDER` | string | *(empty)* | `tei`, `huggingface`, or empty to disable. |
+| `RERANKER_MODEL` | string | `BAAI/bge-reranker-v2-m3` | Reranker model name. |
+| `RERANKER_TOP_K` | int | `5` | Number of results after reranking. |
+| `RERANKER_BASE_URL` | string | `http://localhost:8184` | TEI endpoint URL (when provider=`tei`). Docker Compose uses `http://reranker:80`. |
+| `RERANKER_TIMEOUT` | int | `10` | HTTP timeout in seconds (TEI mode). |
+| `RERANKER_DEVICE` | string | `cpu` | Device for in-process HuggingFace mode (`cpu` or `cuda`). |
+
+### Reranker Modes
+
+| Mode | Config | Pros | Cons |
+|------|--------|------|------|
+| **TEI** (recommended) | `RERANKER_PROVIDER=tei` | No PyTorch in server, fast startup, ~200MB | +2-5ms HTTP overhead |
+| **HuggingFace** (in-process) | `RERANKER_PROVIDER=huggingface` | Lowest latency (~5ms) | Requires PyTorch (~2GB), slow startup |
+| **Disabled** | `RERANKER_PROVIDER=` (empty) | Simplest setup | Vector-only search, lower recall quality |
+
+To enable TEI via Docker Compose, start with the `gpu` profile:
+
+```bash
+docker compose --profile gpu up -d
+```
+
+To run TEI standalone:
+
+```bash
+docker run -d --name tei-reranker --gpus all \
+  -p 127.0.0.1:8184:80 \
+  ghcr.io/huggingface/text-embeddings-inference:1.7 \
+  --model-id BAAI/bge-reranker-v2-m3 --dtype float16 --port 80
+```
+
+Without a GPU, omit `--gpus all` and use `--dtype float32`.
+
+## Classification Pipeline
+
+Runs as a background task after each memory addition.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CLASSIFY_ENABLED` | bool | `true` | Enable automatic classification after each add. |
+| `CLASSIFY_MODEL` | string | *(main LLM model)* | Model for classification. |
+| `CLASSIFY_API_KEY` | string | *(main LLM key)* | API key for classification. |
+| `CLASSIFY_BASE_URL` | string | *(main LLM URL)* | Endpoint for classification. |
+
+## Verification (Optional)
+
+A second LLM pass that verifies classification results. Useful for catching misclassifications.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `VERIFY_ENABLED` | bool | `false` | Enable classification verification. |
+| `VERIFY_PROVIDER` | string | `openai` | `openai` or `anthropic`. |
+| `VERIFY_MODEL` | string | *(empty)* | Model for verification. |
+| `VERIFY_API_KEY` | string | *(empty)* | API key for verification. |
+
+## Authentication
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ADMIN_API_KEY` | string | *(empty)* | Set to require `X-API-Key` header on all endpoints. Leave empty for no auth. |
+| `MAINTENANCE_API_KEY` | string | *(empty)* | Set to protect maintenance and entity management endpoints via `X-Maintenance-Key` header. |
+
+When `ADMIN_API_KEY` is set, every request must include `X-API-Key: <your-key>`. Minimum recommended length is 16 characters. The server logs a warning at startup when the key is not set.
+
+## PostgreSQL
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `POSTGRES_HOST` | string | `postgres` | PostgreSQL host. |
+| `POSTGRES_PORT` | int | `5432` | PostgreSQL port. |
+| `POSTGRES_DB` | string | `postgres` | Database name. |
+| `POSTGRES_USER` | string | `postgres` | Database user. |
+| `POSTGRES_PASSWORD` | string | `postgres` | Database password. |
+| `POSTGRES_COLLECTION_NAME` | string | `memories` | Table name for memories. |
+| `PG_POOL_MIN` | int | `2` | Minimum connection pool size. |
+| `PG_POOL_MAX` | int | `80` | Maximum connection pool size. |
+
+### Docker Compose PostgreSQL
+
+When using Docker Compose, configure PostgreSQL via the root `.env`:
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `PG_PASSWORD` | string | -- | **Required.** PostgreSQL password. |
+| `PG_DB` | string | `mem0` | Database name. |
+| `PG_USER` | string | `mem0` | Database user. |
+| `PG_PORT` | int | `5432` | Host port binding. |
+
+Docker Compose automatically maps these to the `POSTGRES_*` variables inside the API container.
+
+## FalkorDB (Docker Compose)
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `FALKORDB_PORT` | int | `6379` | Host port binding for FalkorDB. |
+
+## Dashboard (Docker Compose)
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DASHBOARD_PORT` | int | `8080` | Host port for the dashboard. |
+
+## Reranker GPU (Docker Compose)
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `RERANKER_PORT` | int | `8184` | Host port for the TEI reranker container. |
+| `RERANKER_MODEL` | string | `BAAI/bge-reranker-v2-m3` | Reranker model to load. |
+
+## History
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `HISTORY_DB_PATH` | string | `/app/history/history.db` | Path for the SQLite history database used by the mem0 SDK. |
 
 ## Custom Prompts
 
-The `server/prompts/` directory contains customizable templates:
+The `server/prompts/` directory contains customizable LLM prompt templates:
 
 ### `extraction.txt`
 
-Controls how facts are extracted from conversations. Supports the `{date}` placeholder which is replaced with the current date at runtime.
+Controls how facts are extracted from conversations. Supports the `{date}` placeholder, which is replaced with the current date at runtime by the SDK.
 
 ### `classification.txt`
 
-Controls how memories are classified into categories. Supports two placeholders:
-- `{taxonomy}` — replaced with the category list from `taxonomy.json`
-- `{memory_text}` — replaced with the memory text being classified
+Controls how memories are classified. Supports two placeholders:
+
+- `{taxonomy}` -- replaced with the category list from `taxonomy.json`
+- `{memory_text}` -- replaced with the memory text being classified
 
 ### `taxonomy.json`
 
-Defines the classification categories and subcategories. Structure:
+Defines classification categories and subcategories:
 
 ```json
 {
@@ -159,51 +221,13 @@ Defines the classification categories and subcategories. Structure:
 }
 ```
 
-Edit this file to add, remove, or rename categories. The classification LLM will use these categories when tagging memories.
-
-## Reranker Modes
-
-### TEI (Recommended)
-
-Runs as a separate Docker container. No PyTorch dependency in the main server.
-
-```bash
-docker run -d --name tei-reranker --gpus all \
-  -p 127.0.0.1:8184:80 \
-  ghcr.io/huggingface/text-embeddings-inference:1.7 \
-  --model-id BAAI/bge-reranker-v2-m3 --dtype float16 --port 80
-```
-
-```bash
-RERANKER_PROVIDER=tei
-RERANKER_BASE_URL=http://localhost:8184
-```
-
-Without a GPU, omit `--gpus all` and use `--dtype float32`.
-
-### HuggingFace (In-Process)
-
-Loads the model directly into the server process. Requires PyTorch.
-
-```bash
-pip install transformers torch
-```
-
-```bash
-RERANKER_PROVIDER=huggingface
-RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-RERANKER_DEVICE=cpu   # or cuda
-```
-
-### Disabled
-
-Leave `RERANKER_PROVIDER` empty (or unset). Search results use vector similarity only.
+Edit this file to add, remove, or rename categories. The classification LLM uses these categories when tagging memories.
 
 ## Connection Pool Tuning
 
-The PostgreSQL connection pool defaults are designed for moderate workloads:
+The PostgreSQL connection pool defaults suit moderate workloads:
 
-- `PG_POOL_MIN=2` — minimum open connections
-- `PG_POOL_MAX=80` — maximum open connections
+- `PG_POOL_MIN=2` -- minimum open connections
+- `PG_POOL_MAX=80` -- maximum open connections
 
 For low-traffic deployments, reduce `PG_POOL_MAX` to 10-20. For high-traffic production, increase `PG_POOL_MIN` to match your baseline concurrency.

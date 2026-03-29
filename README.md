@@ -1,236 +1,144 @@
 # mem0-stack-oss
 
-Self-hosted memory API server for AI agents — built on [mem0](https://github.com/mem0ai/mem0) with automatic classification, importance decay, semantic deduplication, and a dashboard-ready REST API.
+Self-hosted memory API server for AI agents -- built on [mem0](https://github.com/mem0ai/mem0) with automatic classification, importance decay, semantic deduplication, and a React dashboard.
 
-## What is this?
+## Features
 
-A production-ready API server that wraps the mem0 SDK and adds features you need to run memory at scale:
-
-- **Classification pipeline** — automatically categorize every memory with LLM-powered tagging
-- **Combined recall search** — UNION long-term + session memory in a single query, with optional reranking
-- **Memory lifecycle** — importance decay, semantic dedup, TTL expiry, and cleanup
-- **Feedback loop** — users can flag bad memories; `very_negative` auto-suppresses
-- **Full observability** — request logging, source tracking, entity management, statistics
-- **Dashboard** — React-based web UI with i18n (English, 繁體中文, 简体中文)
+- **Vector search + graph memory** -- pgvector for semantic search, FalkorDB (or Neo4j) for entity relationships
+- **Classification pipeline** -- LLM-powered tagging with optional second-LLM verification
+- **Combined recall** -- UNION long-term + session memory in a single query with reranking
+- **Memory lifecycle** -- importance decay, semantic dedup, TTL expiry, feedback-driven suppression
+- **Dashboard** -- React web UI with i18n (English, Traditional Chinese, Simplified Chinese)
+- **Plugin system** -- OpenClaw gateway plugin for automatic memory capture and recall
+- **Full observability** -- request audit log, source tracking, entity management, statistics
 
 ## Architecture
 
 ```
-Client / AI Agent
-    |
-    v
-mem0-stack-oss (FastAPI + AsyncMemory)
-    |
-    ├── pgvector (vector search + metadata)
-    ├── FalkorDB or Neo4j (graph memory)
-    └── Any OpenAI-compatible LLM (fact extraction + classification)
-
-Dashboard (React) ──→ mem0-stack-oss API
+               +------------------+           +-------------------+
+               |  Dashboard       |           |  OpenClaw Gateway |
+               |  (React SPA)     |           |  + mem0 plugin    |
+               +--------+---------+           +---------+---------+
+                        |                               |
+                        |  /api/*                       |  HTTP
+                        v                               v
+               +----------------------------------------+--------+
+               |             mem0-stack-oss  (FastAPI)            |
+               |                                                 |
+               |  AsyncMemory SDK   Classification   Maintenance |
+               +-----+-------------+----------------+-----------+
+                     |             |                |
+            +--------+    +-------+-------+   +----+----+
+            v             v               v   v         v
+   +--------------+  +----------+  +-------------+  +--------+
+   |  PostgreSQL  |  | FalkorDB |  | LLM API     |  | TEI    |
+   |  + pgvector  |  | (graph)  |  | (OpenAI-    |  | Rerank |
+   |              |  |          |  |  compatible) |  | (opt.) |
+   +--------------+  +----------+  +-------------+  +--------+
 ```
 
-## Quick start
-
-### 1. Clone and configure
+## Quick Start
 
 ```bash
-git clone https://github.com/farrrr/mem0-stack-oss.git /opt/mem0-stack
-cd /opt/mem0-stack/server
+# 1. Clone
+git clone https://github.com/farrrr/mem0-stack-oss.git
+cd mem0-stack-oss
+
+# 2. Configure
 cp .env.example .env
-# Edit .env with your API keys and database credentials
+# Edit .env -- set OPENAI_API_KEY and PG_PASSWORD at minimum
+
+# 3. Start all services
+docker compose up -d
+
+# 4. Verify
+curl http://localhost:8080/api/health
+# {"status": "ok"}
 ```
 
-### 2a. Run with systemd (recommended for production)
+Open `http://localhost:8080` for the dashboard. The API is available at `http://localhost:8080/api/` (proxied) or directly at `http://localhost:8090` (when not using Docker Compose).
+
+### Add your first memory
 
 ```bash
-# Create virtual environment
-python3 -m venv /opt/mem0-stack/venv
-/opt/mem0-stack/venv/bin/pip install -r /opt/mem0-stack/server/requirements.txt
-
-# Install systemd service
-mkdir -p ~/.config/systemd/user
-cp /opt/mem0-stack/systemd/mem0-api.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now mem0-api
-
-# Verify
-curl -X GET http://localhost:8090/health
+curl -X POST http://localhost:8080/api/memories \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "I prefer dark mode and use VS Code as my editor."}
+    ],
+    "user_id": "alice"
+  }'
 ```
 
-Requires PostgreSQL with pgvector and FalkorDB (or Neo4j) running separately.
-
-### 2b. Run with Docker Compose
+### Search for it
 
 ```bash
-cd /opt/mem0-stack/server
-docker compose up
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What editor does Alice use?",
+    "user_id": "alice"
+  }'
 ```
 
-The API is available at `http://localhost:8888`. Visit `/docs` for the interactive OpenAPI explorer.
+## Docker Compose Services
 
-### 2c. Run directly (development)
+| Service | Image | Port | Description |
+|---------|-------|------|-------------|
+| `postgres` | `pgvector/pgvector:pg16` | 5432 (localhost only) | Vector storage + metadata |
+| `falkordb` | `falkordb/falkordb:latest` | 6379 (localhost only) | Graph memory |
+| `api` | Built from `server/Dockerfile` | 8000 (internal) | FastAPI server |
+| `dashboard` | Built from `dashboard/Dockerfile` | **8080** | nginx + React SPA + API proxy |
+| `reranker` | `ghcr.io/huggingface/text-embeddings-inference:1.7` | 8184 (localhost only) | GPU reranker (opt., `--profile gpu`) |
+
+To enable the GPU reranker:
 
 ```bash
-cd /opt/mem0-stack/server
-/opt/mem0-stack/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8090 --reload
+docker compose --profile gpu up -d
 ```
-
-### 3. Dashboard (optional)
-
-```bash
-cd /opt/mem0-stack/dashboard
-npm install
-npm run build
-
-# Development with hot-reload
-npm run dev
-```
-
-## Service management
-
-```bash
-# Start / stop / restart
-systemctl --user start mem0-api
-systemctl --user stop mem0-api
-systemctl --user restart mem0-api
-
-# View logs
-journalctl --user -u mem0-api -f
-
-# Check status
-systemctl --user status mem0-api
-```
-
-## API endpoints
-
-### Core
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/memories` | Create memories (triggers background classification) |
-| `GET` | `/memories` | List memories with server-side pagination and filtering |
-| `GET` | `/memories/{id}` | Get a specific memory |
-| `PUT` | `/memories/{id}` | Update a memory |
-| `DELETE` | `/memories/{id}` | Delete a memory |
-| `DELETE` | `/memories` | Delete all memories for an entity |
-| `POST` | `/search` | Search memories via SDK |
-| `POST` | `/configure` | Hot-reload memory configuration |
-| `POST` | `/reset` | Reset all memories |
-| `GET` | `/health` | Health check |
-
-### Memories pagination
-
-`GET /memories` supports server-side pagination and filtering:
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `user_id` | string | **Required** (one of user_id/agent_id/run_id) |
-| `agent_id` | string | Filter by agent |
-| `run_id` | string | Filter by session |
-| `limit` | int | Results per page (default 35, max 500) |
-| `offset` | int | Pagination offset |
-| `category` | string | Filter by classification category |
-| `confidence` | string | Filter by confidence (high/medium/low) |
-| `date_range` | string | Filter by time: `1d`, `7d`, or `30d` |
-| `search` | string | Text search (ILIKE) |
-
-### Classification
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/taxonomy` | Get classification categories |
-| `POST` | `/memories/{id}/reclassify` | Reclassify a single memory |
-| `POST` | `/reclassify-all` | Bulk reclassify (supports `only_unclassified`) |
-
-### Combined recall
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/search/recall` | UNION long-term + session search with optional reranking |
-
-### Feedback
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/memories/{id}/feedback` | Submit feedback (positive/negative/very_negative) |
-| `GET` | `/memories/{id}/feedback` | Get feedback for a memory |
-| `GET` | `/feedback/stats` | Feedback statistics |
-
-### Source tracking
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/memories/{id}/source` | Original conversation that produced this memory |
-| `GET` | `/memories/{id}/history` | Memory change history |
-
-### Entity management
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/entities` | List agents/apps for a user |
-| `GET` | `/entities/by-type` | List entities by type (user/agent/app/run) |
-| `GET` | `/entities/users` | List all users with memory counts |
-| `DELETE` | `/entities/{type}/{id}` | Delete an entity's memories |
-
-### Maintenance (requires `MAINTENANCE_API_KEY`)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/maintenance/decay` | Exponential importance score decay |
-| `POST` | `/maintenance/dedup` | Semantic deduplication |
-| `POST` | `/maintenance/cleanup-expired` | Remove expired and low-importance memories |
-
-### Observability
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/stats` | Aggregated system statistics |
-| `GET` | `/requests` | API request audit log |
-| `GET` | `/requests/{id}` | Request detail |
-| `GET` | `/requests/daily-stats` | Daily request counts for dashboards |
 
 ## Configuration
 
-All configuration is via environment variables. See [`.env.example`](server/.env.example) for the full list.
+All configuration is via the `.env` file. See [docs/configuration.md](docs/configuration.md) for the complete reference.
 
-### Key settings
+Key settings:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `OPENAI_API_KEY` | -- | Required. LLM + embedding API key |
+| `PG_PASSWORD` | -- | Required. PostgreSQL password |
 | `LLM_PROVIDER` | `openai` | Any OpenAI-compatible provider |
 | `LLM_MODEL` | `gpt-4.1-nano-2025-04-14` | Model for fact extraction |
-| `LLM_BASE_URL` | *(empty)* | Custom endpoint (e.g. Cerebras, Together) |
-| `GRAPH_PROVIDER` | `falkordb` | `falkordb` or `neo4j` |
-| `RERANKER_PROVIDER` | *(empty)* | `tei` (HTTP, recommended) or `huggingface` (in-process) |
-| `RERANKER_BASE_URL` | `http://localhost:8184` | TEI reranker endpoint (when provider=tei) |
-| `CLASSIFY_ENABLED` | `true` | Background classification after each add |
-| `ADMIN_API_KEY` | *(empty)* | Set to secure all endpoints |
-| `MAINTENANCE_API_KEY` | *(empty)* | Set to protect maintenance endpoints |
+| `LLM_BASE_URL` | *(empty)* | Custom endpoint (e.g. `https://api.cerebras.ai/v1`) |
+| `RERANKER_PROVIDER` | *(empty)* | `tei` or `huggingface` -- leave empty to disable |
+| `CLASSIFY_ENABLED` | `true` | Auto-classify memories after each add |
+| `ADMIN_API_KEY` | *(empty)* | Set to secure all API endpoints |
 
-### Custom prompts
+## Tech Stack
 
-The `server/prompts/` directory contains customizable templates:
+| Component | Technology |
+|-----------|-----------|
+| API server | Python 3.12, FastAPI, uvicorn, mem0 SDK (AsyncMemory) |
+| Vector store | PostgreSQL 16 + pgvector |
+| Graph store | FalkorDB (default) or Neo4j |
+| LLM | Any OpenAI-compatible API |
+| Embedder | OpenAI text-embedding-3-small (default) |
+| Reranker | HuggingFace TEI (bge-reranker-v2-m3) |
+| Dashboard | React 19, TypeScript, Vite, Tailwind CSS, TanStack Query, react-i18next |
+| Plugin | TypeScript, OpenClaw plugin SDK |
 
-- `extraction.txt` — fact extraction prompt (supports `{date}` placeholder)
-- `classification.txt` — classification prompt (supports `{taxonomy}` and `{memory_text}`)
-- `taxonomy.json` — classification categories and subcategories
+## Documentation
 
-### Reranker options
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Prerequisites, step-by-step setup, first memory |
+| [Configuration](docs/configuration.md) | Complete environment variable reference |
+| [Architecture](docs/architecture.md) | System design, pipeline flows, data model |
+| [Deployment](docs/deployment.md) | Docker Compose, systemd, SSL, backups |
+| [API Reference](docs/api-reference.md) | Every endpoint with curl examples |
 
-| Mode | Config | Pros | Cons |
-|------|--------|------|------|
-| **TEI (recommended)** | `RERANKER_PROVIDER=tei` | No PyTorch, fast startup, ~200MB server | +2-5ms HTTP overhead |
-| **In-process** | `RERANKER_PROVIDER=huggingface` | Lowest latency (~5ms) | Requires PyTorch (~2GB), slow startup |
-| **Disabled** | `RERANKER_PROVIDER=` (empty) | Simplest, no dependencies | Vector search only, lower recall quality |
-
-To run TEI reranker:
-```bash
-docker run -d --name tei-reranker --gpus all \
-  -p 127.0.0.1:8184:80 \
-  ghcr.io/huggingface/text-embeddings-inference:1.7 \
-  --model-id BAAI/bge-reranker-v2-m3 --dtype float16 --port 80
-```
-
-## What's different from upstream mem0 server
+## What's Different from Upstream mem0
 
 | Feature | Upstream | mem0-stack-oss |
 |---------|----------|----------------|
@@ -238,7 +146,7 @@ docker run -d --name tei-reranker --gpus all \
 | Init | module-level | FastAPI lifespan |
 | Graph store | Neo4j only | FalkorDB (default) + Neo4j |
 | LLM | OpenAI hard-coded | Any OpenAI-compatible endpoint |
-| Reranker | None | TEI (HTTP) or HuggingFace (in-process), switchable |
+| Reranker | None | TEI (HTTP) or HuggingFace (in-process) |
 | Classification | None | 3-stage pipeline (classify + verify + store) |
 | Combined search | None | UNION long-term + session + rerank |
 | Pagination | Client-side only | Server-side with filtering |
@@ -248,53 +156,33 @@ docker run -d --name tei-reranker --gpus all \
 | Maintenance | None | Decay, dedup, cleanup-expired |
 | Statistics | None | Dashboard-ready aggregations |
 | Source tracking | None | Original conversation per memory |
-| Connection pool | Default (5) | Configurable (default 2-80) |
 | Dashboard | None | React + i18n (en/zh-TW/zh-CN) |
-| Deployment | Docker only | systemd + Docker |
 
-## Project structure
+## Project Structure
 
 ```
 mem0-stack-oss/
+├── compose.yaml                # Docker Compose (all services)
+├── .env.example                # Root config template
 ├── server/
 │   ├── main.py                 # FastAPI app (all endpoints)
-│   ├── prompts/
-│   │   ├── extraction.txt      # Fact extraction prompt
-│   │   ├── classification.txt  # Classification prompt
-│   │   └── taxonomy.json       # Category definitions
-│   ├── .env.example            # Environment variable reference
+│   ├── prompts/                # Customizable LLM prompts
+│   ├── .env.example            # Server-specific config reference
 │   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── dev.Dockerfile
-│   ├── docker-compose.yaml
-│   └── Makefile
+│   └── Dockerfile
 ├── dashboard/                  # React web UI
-│   ├── src/
-│   │   ├── pages/              # 7 pages + login
-│   │   ├── components/         # Shared UI components
-│   │   ├── i18n/               # en, zh-TW, zh-CN
-│   │   └── lib/                # API client, types, utils
-│   ├── package.json
-│   └── vite.config.ts
+│   ├── src/pages/              # 10 pages + login
+│   ├── src/i18n/               # en, zh-TW, zh-CN
+│   └── Dockerfile
 ├── plugins/
 │   └── openclaw/               # OpenClaw gateway memory plugin
-│       ├── src/
-│       │   ├── index.ts        # Plugin entry
-│       │   ├── providers.ts    # HTTP client (aligned to server API)
-│       │   ├── hooks.ts        # autoRecall + autoCapture
-│       │   ├── tools.ts        # 8 memory tools
-│       │   ├── filtering.ts    # Noise filtering (EN + zh-TW)
-│       │   ├── identity.ts     # User/agent mapping
-│       │   ├── config.ts       # Config parsing
-│       │   └── types.ts        # TypeScript interfaces
-│       └── openclaw.plugin.json
 ├── systemd/
 │   └── mem0-api.service        # systemd service template
-└── docs/
-    └── features/
-        └── rest-api.md
+└── docs/                       # Documentation
 ```
 
 ## License
 
-This project builds on [mem0](https://github.com/mem0ai/mem0), licensed under Apache 2.0.
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+This project uses the [mem0](https://github.com/mem0ai/mem0) SDK as a library dependency, also licensed under Apache 2.0. See [NOTICE](NOTICE) for details.

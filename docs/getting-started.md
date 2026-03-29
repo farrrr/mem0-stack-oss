@@ -1,66 +1,57 @@
 # Getting Started
 
-Go from zero to a running memory API server in 5 minutes.
+Go from zero to a running memory API in 5 minutes.
 
 ## Prerequisites
 
-- **Python 3.12+**
-- **PostgreSQL** with the [pgvector](https://github.com/pgvector/pgvector) extension
-- **FalkorDB** (recommended) or **Neo4j** for graph memory
-- An **OpenAI-compatible LLM API key** (OpenAI, Cerebras, Together, etc.)
+- **Docker** and **Docker Compose** (v2+)
+- An **OpenAI-compatible LLM API key** (OpenAI, Cerebras, Together, Groq, etc.)
 
-## 1. Clone the repository
+That's it. Docker Compose handles PostgreSQL, FalkorDB, the API server, and the dashboard.
+
+> For a non-Docker setup, see [Deployment](deployment.md).
+
+## 1. Clone the Repository
 
 ```bash
-git clone https://github.com/farrrr/mem0-stack-oss.git /opt/mem0-stack
-cd /opt/mem0-stack
+git clone https://github.com/farrrr/mem0-stack-oss.git
+cd mem0-stack-oss
 ```
 
-## 2. Set up Python environment
+## 2. Configure Environment
 
 ```bash
-python3 -m venv /opt/mem0-stack/venv
-/opt/mem0-stack/venv/bin/pip install -r /opt/mem0-stack/server/requirements.txt
-```
-
-## 3. Configure environment
-
-```bash
-cd /opt/mem0-stack/server
 cp .env.example .env
 ```
 
-Edit `.env` with at minimum:
+Open `.env` and set the two required values:
 
 ```bash
-# Your LLM API key (required)
-LLM_API_KEY=sk-your-key-here
-
-# PostgreSQL connection
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your-password
-
-# Graph store (FalkorDB is the default)
-GRAPH_PROVIDER=falkordb
-FALKORDB_HOST=localhost
-FALKORDB_PORT=6379
+OPENAI_API_KEY=sk-your-openai-key
+PG_PASSWORD=change-me-in-production
 ```
 
-If you use the same API key for embeddings, `LLM_API_KEY` is sufficient. Otherwise, set `EMBEDDER_API_KEY` separately. You can also set `OPENAI_API_KEY` as a fallback for both.
+These are the only required settings. The defaults work out of the box for everything else. See [Configuration](configuration.md) for the full variable reference.
 
-## 4. Start the server
+## 3. Start the Stack
 
 ```bash
-cd /opt/mem0-stack/server
-/opt/mem0-stack/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8090
+docker compose up -d
 ```
 
-## 5. Verify it works
+This starts four services:
+
+| Service | Description |
+|---------|-------------|
+| `postgres` | PostgreSQL 16 with pgvector |
+| `falkordb` | FalkorDB for graph memory |
+| `api` | FastAPI server (mem0 API) |
+| `dashboard` | nginx serving React frontend + API proxy |
+
+## 4. Verify
 
 ```bash
-curl http://localhost:8090/health
+curl http://localhost:8080/api/health
 ```
 
 Expected response:
@@ -69,25 +60,32 @@ Expected response:
 {"status": "ok"}
 ```
 
-Visit `http://localhost:8090/docs` for the interactive OpenAPI explorer.
+Open `http://localhost:8080` in your browser to see the dashboard.
 
-## 6. Add your first memory
+The API server also exposes an interactive OpenAPI explorer at `http://localhost:8080/api/docs`.
+
+## 5. Add Your First Memory
+
+Store a memory for a user named "alice":
 
 ```bash
-curl -X POST http://localhost:8090/memories \
+curl -X POST http://localhost:8080/api/memories \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [
-      {"role": "user", "content": "I prefer dark mode and use VS Code as my editor."}
+      {"role": "user", "content": "I prefer dark mode and use VS Code as my editor."},
+      {"role": "assistant", "content": "Got it! I will remember your preferences."}
     ],
     "user_id": "alice"
   }'
 ```
 
-Search for it:
+The server extracts facts from the conversation (e.g., "Alice prefers dark mode", "Alice uses VS Code") and stores them as separate memories. A background task classifies each memory into a category.
+
+## 6. Search Memories
 
 ```bash
-curl -X POST http://localhost:8090/search \
+curl -X POST http://localhost:8080/api/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What editor does Alice use?",
@@ -95,47 +93,21 @@ curl -X POST http://localhost:8090/search \
   }'
 ```
 
-## Optional: Next steps
+You receive a list of memories ranked by relevance, each with a similarity score.
 
-### Install as a systemd service
-
-For production, run the server as a systemd service instead of manually:
+## 7. List All Memories
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp /opt/mem0-stack/systemd/mem0-api.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now mem0-api
+curl "http://localhost:8080/api/memories?user_id=alice"
 ```
 
-See [deployment.md](deployment.md) for full details.
+This returns paginated results with metadata, classification, and timestamps.
 
-### Build the dashboard
+## Next Steps
 
-```bash
-cd /opt/mem0-stack/dashboard
-npm install
-npm run build
-```
-
-The built files go to `dashboard/dist/`. See [deployment.md](deployment.md) for serving with nginx.
-
-### Set up TEI reranker
-
-For better search quality, run a TEI reranker container:
-
-```bash
-docker run -d --name tei-reranker --gpus all \
-  -p 127.0.0.1:8184:80 \
-  ghcr.io/huggingface/text-embeddings-inference:1.7 \
-  --model-id BAAI/bge-reranker-v2-m3 --dtype float16 --port 80
-```
-
-Then set in `.env`:
-
-```bash
-RERANKER_PROVIDER=tei
-RERANKER_BASE_URL=http://localhost:8184
-```
-
-See [configuration.md](configuration.md) for all reranker options.
+- **Secure the API**: Set `ADMIN_API_KEY` in your `.env` to require authentication on all endpoints.
+- **Enable the reranker**: Add `--profile gpu` to improve search quality. See [Configuration](configuration.md#reranker-optional).
+- **Customize extraction**: Edit `server/prompts/extraction.txt` to control what facts the LLM extracts.
+- **Deploy to production**: See [Deployment](deployment.md) for systemd, SSL, and backup instructions.
+- **Explore the API**: See [API Reference](api-reference.md) for every endpoint with curl examples.
+- **Connect an AI agent**: Install the [OpenClaw plugin](../plugins/openclaw/README.md) for automatic memory capture and recall.

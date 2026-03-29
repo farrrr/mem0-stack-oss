@@ -3,237 +3,315 @@
 ## System Diagram
 
 ```
-                    ┌──────────────────┐
-                    │  Client / Agent  │
-                    │  (HTTP / Plugin) │
-                    └────────┬─────────┘
-                             │
-                             v
-                    ┌──────────────────┐
-                    │  mem0-stack-oss  │
-                    │  (FastAPI)       │
-                    │                  │
-                    │  AsyncMemory SDK │
-                    └──┬─────┬─────┬──┘
-                       │     │     │
-              ┌────────┘     │     └────────┐
-              v              v              v
-     ┌──────────────┐ ┌───────────┐ ┌─────────────────┐
-     │  PostgreSQL   │ │ FalkorDB  │ │ OpenAI-compat   │
-     │  + pgvector   │ │ or Neo4j  │ │ LLM API         │
-     │              │ │           │ │                 │
-     │ Vector store │ │ Graph     │ │ Fact extraction │
-     │ + metadata   │ │ memory    │ │ Classification  │
-     └──────────────┘ └───────────┘ └─────────────────┘
-
-     ┌──────────────────────────┐
-     │  Dashboard (React SPA)   │──── GET/POST ───> mem0-stack-oss API
-     └──────────────────────────┘
-
-     ┌──────────────────────────┐
-     │  OpenClaw Gateway        │
-     │  + openclaw-mem0 plugin  │──── HTTP ────────> mem0-stack-oss API
-     └──────────────────────────┘
+               +------------------+           +-------------------+
+               |  Dashboard       |           |  OpenClaw Gateway |
+               |  (React SPA)     |           |  + mem0 plugin    |
+               +--------+---------+           +---------+---------+
+                        |                               |
+                  nginx | /api/*                        | HTTP
+                 proxy  |                               |
+                        v                               v
+               +------------------------------------------------+
+               |           mem0-stack-oss  API (FastAPI)         |
+               |                                                |
+               |  +------------+  +-----------+  +------------+ |
+               |  | AsyncMemory|  | Classify  |  | Maintenance| |
+               |  | SDK        |  | Pipeline  |  | Jobs       | |
+               |  +-----+------+  +-----+-----+  +-----+------+ |
+               +--------|---------------|---------------|--------+
+                        |               |               |
+           +------------+------+--------+-------+-------+
+           |                   |                |
+           v                   v                v
+  +-----------------+   +-----------+   +---------------+
+  |  PostgreSQL 16  |   | FalkorDB  |   | OpenAI-compat |
+  |  + pgvector     |   | (Redis    |   | LLM API       |
+  |                 |   |  protocol)|   |               |
+  |  - memories     |   |           |   | - extraction  |
+  |  - api_requests |   | - entity  |   | - classify    |
+  |  - mem_sources  |   |   graph   |   | - verify      |
+  |  - mem_feedback |   | - per-user|   | - graph       |
+  +-----------------+   +-----------+   +---------------+
+                                               |
+                                        +------+------+
+                                        | TEI Reranker|
+                                        | (optional,  |
+                                        |  GPU)       |
+                                        +-------------+
 ```
 
-## Request Flow
+## ADD Pipeline (`POST /memories`)
 
-### Adding a memory (`POST /memories`)
+When you add a memory, the server processes it through several stages:
 
 ```
 Client sends messages + user_id
-    │
+    |
     v
-API validates request
-    │
+[1] Validate request (requires at least one identifier)
+    |
     v
-AsyncMemory.add() ──> LLM extracts facts from conversation
-    │                      │
-    │                      v
-    │                  Facts stored in pgvector (embedding + metadata)
-    │                      │
-    │                      v
-    │                  Graph entities extracted and stored in FalkorDB
-    │
+[2] AsyncMemory.add()
+    |-- LLM extracts discrete facts from the conversation
+    |-- Each fact is embedded via the embedder model
+    |-- Embeddings stored in pgvector (memories table)
+    |-- SDK handles dedup: if a similar fact exists, it UPDATEs instead of INSERTing
+    |-- Graph entities extracted and stored in FalkorDB (per-user namespace)
+    |
     v
-Response returned immediately (memory IDs)
-    │
+[3] Response returned immediately (memory IDs + events)
+    |
     v
-Background task: classify + verify + store classification
+[4] Background tasks (fire-and-forget):
+    |-- save_memory_source: store original conversation messages
+    |-- init_memory_metadata: set importance_score=1.0, last_accessed_at
+    |-- classify_and_store: LLM classifies each new memory
+    |       |
+    |       +-- [4a] classify_memory: LLM assigns category + subcategory + tags
+    |       |
+    |       +-- [4b] verify_classification (optional): second LLM confirms
+    |       |
+    |       +-- [4c] store_classification: write to payload.metadata in PG
+    |
+    +-- log_request: audit log entry
 ```
 
-### Searching memories (`POST /search`)
+Events returned per memory:
+
+| Event | Meaning |
+|-------|---------|
+| `ADD` | New memory created |
+| `UPDATE` | Existing similar memory updated |
+| `DELETE` | Memory removed (SDK-level dedup) |
+| `NOOP` | No action needed (fact already stored) |
+
+## SEARCH Pipeline (`POST /search`)
 
 ```
 Client sends query + user_id
-    │
+    |
     v
-AsyncMemory.search() ──> Query embedded via embedder
-    │                         │
-    │                         v
-    │                     pgvector similarity search
-    │                         │
-    │                         v
-    │                     (Optional) Reranker rescores results
-    │
+[1] AsyncMemory.search()
+    |-- Query embedded via embedder model
+    |-- pgvector cosine similarity search
+    |-- (Optional) Reranker rescores top results
+    |
     v
-Results returned with scores and metadata
+[2] Results returned with similarity scores and metadata
+    |
+    v
+[3] Background tasks:
+    +-- update_last_accessed: touch last_accessed_at for hit memories
+    +-- log_request: audit log entry
 ```
 
-### Combined recall (`POST /search/recall`)
+## RECALL Pipeline (`POST /search/recall`)
+
+A custom pipeline that bypasses the SDK for combined long-term + session search:
 
 ```
 Client sends query + user_id + optional run_id
-    │
+    |
     v
-Two parallel searches:
-    ├── Long-term search (user_id)
-    └── Session search (run_id, if provided)
-    │
+[1] Embed query once
+    |
     v
-UNION results, deduplicate
-    │
+[2] SQL query:
+    |-- When run_id is provided:
+    |       (SELECT from memories WHERE user_id = ?)
+    |       UNION ALL
+    |       (SELECT from memories WHERE user_id = ? AND run_id = ?)
+    |-- When run_id is absent:
+    |       SELECT from memories WHERE user_id = ?
+    |
     v
-(Optional) Reranker rescores combined results
-    │
+[3] Deduplicate (UNION may produce overlapping results)
+    |
     v
-Top-K results returned
+[4] (Optional) Reranker rescores combined results
+    |
+    v
+[5] Threshold filter (remove low-scoring results)
+    |
+    v
+[6] Return top-K results
 ```
+
+This approach merges persistent user memories with session-specific memories in a single request, reducing latency for AI agent workflows.
 
 ## Classification Pipeline
 
 Every memory added goes through a background classification pipeline:
 
 ```
-Memory created
-    │
+Memory text
+    |
     v
-[1] Classify ── LLM assigns category + subcategory + confidence
-    │
+[Stage 1] Classify
+    |-- LLM reads the memory + taxonomy prompt
+    |-- Returns: category, subcategory, tags, confidence
+    |
     v
-[2] Verify (optional) ── second LLM confirms or corrects
-    │
+[Stage 2] Verify (optional, when VERIFY_ENABLED=true)
+    |-- A different LLM (can be a different provider, e.g. Anthropic)
+    |-- Rates confidence as high/medium/low
+    |
     v
-[3] Store ── classification metadata saved to memory payload
+[Stage 3] Store
+    +-- Classification metadata written to memory payload in PostgreSQL
 ```
 
-- **Stage 1 (Classify)**: Uses the classification prompt template with the taxonomy to assign a category, subcategory, and confidence level (high/medium/low).
-- **Stage 2 (Verify)**: Optional. A different LLM (can be a different provider, e.g. Anthropic) verifies the classification. Enable with `VERIFY_ENABLED=true`.
-- **Stage 3 (Store)**: The final classification is written to the memory's metadata in PostgreSQL.
+- **Stage 1 (Classify)**: Uses the classification prompt template with the taxonomy to assign categories. Controlled by `CLASSIFY_MODEL`.
+- **Stage 2 (Verify)**: Optional second opinion. Useful when classification accuracy is critical. Supports both OpenAI and Anthropic providers.
+- **Stage 3 (Store)**: Writes `category`, `subcategory`, `tags`, `confidence`, `classified_by`, `classified_at` to the memory metadata.
 
 ## Memory Lifecycle
 
 ```
-Add ──> Classify ──> Available for search/recall
-                         │
-                         ├── Decay (importance score decreases over time)
-                         ├── Dedup (semantically similar memories merged)
-                         ├── Feedback (users flag bad memories)
-                         │       └── very_negative → auto-suppressed
-                         └── Cleanup (expired + low-importance removed)
+Add --> Classify --> Available for search/recall
+                       |
+                       +-- Decay (importance_score decreases over time)
+                       +-- Dedup (semantically similar memories merged)
+                       +-- Feedback
+                       |       +-- positive: no action
+                       |       +-- negative: logged for review
+                       |       +-- very_negative: auto-suppressed (hidden from search)
+                       +-- Cleanup (expired + low-importance removed)
 ```
 
-Maintenance operations are triggered via the `/maintenance/*` endpoints:
+Maintenance operations run on demand via `/maintenance/*` endpoints:
 
 | Endpoint | What it does |
 |----------|-------------|
-| `/maintenance/decay` | Applies exponential decay to importance scores based on age |
-| `/maintenance/dedup` | Finds semantically similar memories and merges them |
-| `/maintenance/cleanup-expired` | Removes memories below importance threshold or past TTL |
+| `POST /maintenance/decay` | Exponential decay on importance_score based on days since last access. Default half-life: ~70 days. |
+| `POST /maintenance/dedup` | Cosine similarity scan to find and remove near-duplicate memories. Default threshold: 0.95. |
+| `POST /maintenance/cleanup-expired` | Remove memories past their TTL `expires_at` and optionally those below an importance threshold. |
 
-These are designed to be called on a schedule (e.g. daily cron job).
+These endpoints support `dry_run=true` (default) for previewing changes before applying them.
 
 ## Component Descriptions
 
 ### AsyncMemory SDK
 
-The server uses the async variant of the mem0 SDK (`AsyncMemory`). This provides non-blocking I/O for all database and LLM operations, initialized via FastAPI's lifespan context manager for clean startup and shutdown.
+The server uses the async variant of the [mem0 SDK](https://github.com/mem0ai/mem0) (`AsyncMemory`). This provides non-blocking I/O for all database and LLM operations. The instance is initialized via FastAPI's lifespan context manager and shared across all requests.
 
 ### pgvector (PostgreSQL)
 
-Stores memory embeddings and metadata. Each memory is a row containing:
-- Vector embedding (for similarity search)
-- Memory text
-- Entity identifiers (user_id, agent_id, run_id)
-- Classification metadata (category, subcategory, confidence)
-- Importance score (for decay)
-- Timestamps (created, updated)
-- Source conversation (original messages)
-- Feedback data
+Stores memory embeddings and metadata. The `memories` table contains:
+
+- Vector embedding (for cosine similarity search)
+- Memory text (the extracted fact)
+- Entity identifiers (`user_id`, `agent_id`, `run_id`)
+- Classification metadata (`category`, `subcategory`, `confidence`, `tags`)
+- Lifecycle metadata (`importance_score`, `last_accessed_at`, `expires_at`)
+- Timestamps (`created_at`, `updated_at`)
+
+Extension tables managed by the server:
+
+| Table | Purpose |
+|-------|---------|
+| `api_requests` | Audit log of all API requests |
+| `memory_sources` | Original conversation messages per memory |
+| `memory_feedback` | User feedback records |
 
 ### FalkorDB / Neo4j
 
-Stores entity relationships extracted from conversations as a knowledge graph. Each user gets an isolated graph namespace. FalkorDB is the recommended default (Redis-compatible protocol, lower resource usage). Neo4j is supported as an alternative.
+Stores entity relationships extracted from conversations as a knowledge graph. Each user gets an isolated graph namespace (`mem0_{user_id}`). FalkorDB is the recommended default (Redis-compatible protocol, lower resource usage). Neo4j is supported as an alternative.
 
 ### TEI Reranker
 
-An optional [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) container that rescores search results using a cross-encoder model. Improves recall quality by ~15-20% compared to vector-only search. Communicates with the server over HTTP.
+An optional [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) container that rescores search results using a cross-encoder model (bge-reranker-v2-m3). Communicates with the server over HTTP. Improves recall quality compared to vector-only search.
 
 ### Dashboard
 
-A React single-page application with:
-- Memory browser with pagination, filtering, and search
-- Classification category views
-- Entity management
-- Feedback review
-- Request audit log
-- System statistics
-- i18n support (English, Traditional Chinese, Simplified Chinese)
+A React single-page application served by nginx. Pages include:
 
-## Data Model
+| Page | Description |
+|------|-------------|
+| Dashboard | Overview with stats and activity charts |
+| Memories | Memory browser with pagination, filtering, and search |
+| Search | Interactive memory search |
+| Entities | User and agent entity management |
+| Graph | Visual graph explorer (force-directed) |
+| Stats | Detailed system statistics |
+| Requests | API request audit log |
+| Maintenance | Decay, dedup, and cleanup tools |
+| Health | Service health checks |
+| Login | API key authentication |
 
-Memories are stored in PostgreSQL with this payload structure:
+nginx proxies `/api/*` requests to the FastAPI server.
 
-```json
-{
-  "id": "uuid",
-  "memory": "User prefers dark mode",
-  "hash": "sha256-of-memory-text",
-  "metadata": {
-    "category": "preference",
-    "subcategory": "ui",
-    "confidence": "high",
-    "classified_at": "2025-01-15T10:30:00Z",
-    "verified": true,
-    "importance_score": 0.85,
-    "source": "conversation"
-  },
-  "user_id": "alice",
-  "agent_id": "my-agent",
-  "run_id": "session-123",
-  "created_at": "2025-01-15T10:30:00Z",
-  "updated_at": "2025-01-15T10:30:00Z"
-}
-```
-
-## Plugin Architecture
+### OpenClaw Plugin
 
 The OpenClaw plugin bridges AI agent conversations to the memory server:
 
 ```
-User message ──> OpenClaw Gateway
-                     │
-                     ├── autoRecall hook
-                     │       └── POST /search/recall ──> mem0-stack-oss
-                     │       └── Inject memories into agent context
-                     │
+User message --> OpenClaw Gateway
+                     |
+                     +-- autoRecall hook
+                     |       +-- POST /search/recall --> mem0-stack-oss
+                     |       +-- Inject memories into agent context
+                     |
                      v
                  Agent processes message
-                     │
-                     ├── autoCapture hook
-                     │       └── POST /memories ──> mem0-stack-oss
-                     │       └── Background classification triggered
-                     │
-                     ├── Memory tools (8 tools available to the agent)
-                     │       └── search, add, delete, list, feedback, etc.
-                     │
-                     └── Noise filtering
-                             └── Skips trivial messages (greetings, acknowledgments)
+                     |
+                     +-- autoCapture hook
+                     |       +-- POST /memories --> mem0-stack-oss
+                     |
+                     +-- 8 memory tools available to the agent
+                     |
+                     +-- Noise filtering (skip trivial messages)
 ```
 
-The plugin includes:
-- **autoRecall**: Before each agent turn, searches for relevant memories and injects them into the system prompt.
-- **autoCapture**: After each agent turn, stores the conversation context as new memories.
-- **Noise filtering**: Bilingual (English + Chinese) filters to skip trivial messages that would not produce useful memories.
-- **Identity mapping**: Maps OpenClaw user/agent identifiers to mem0 entity IDs.
-- **8 memory tools**: Exposes memory operations as tools the agent can call directly.
+## Data Model
+
+### Memory Record
+
+Each memory is stored as a row in the `memories` table with a JSONB `payload` column:
+
+```json
+{
+  "data": "User prefers dark mode",
+  "hash": "sha256-of-memory-text",
+  "user_id": "alice",
+  "agent_id": "my-agent",
+  "run_id": "session-123",
+  "created_at": "2025-01-15T10:30:00Z",
+  "updated_at": "2025-01-15T10:30:00Z",
+  "metadata": {
+    "category": ["preference"],
+    "subcategory": ["ui"],
+    "tags": ["dark-mode", "theme"],
+    "confidence": "high",
+    "classified_by": "gpt-4.1-nano-2025-04-14",
+    "classified_at": "2025-01-15T10:30:01Z",
+    "verified_by": "anthropic/claude-haiku-4",
+    "importance_score": 0.85,
+    "last_accessed_at": "2025-01-16T09:00:00Z",
+    "expires_at": null,
+    "suppressed": false
+  }
+}
+```
+
+### Graph Entities
+
+Graph data is stored in FalkorDB under the namespace `mem0_{user_id}`. Each graph contains:
+
+- **Nodes**: Entities extracted from conversations (people, tools, concepts)
+- **Edges**: Relationships between entities (uses, prefers, works_with)
+
+### Feedback Record
+
+```json
+{
+  "id": 1,
+  "memory_id": "uuid",
+  "user_id": "alice",
+  "feedback": "very_negative",
+  "reason": "This memory is incorrect",
+  "created_at": "2025-01-15T11:00:00Z"
+}
+```
+
+When feedback is `very_negative`, the memory's `metadata.suppressed` flag is set to `true`, hiding it from search results.
