@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import openai
 import psycopg2
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
@@ -812,7 +813,22 @@ async def add_memory(
     params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
     start = time.time()
     try:
-        response = await mem0.add(messages=[m.model_dump() for m in memory_create.messages], **params)
+        # Transient LLM errors (e.g. 503 from graph extraction) should not
+        # fail the entire request.  The SDK's add() runs vector store and
+        # graph extraction concurrently; a graph/classification 503 propagates
+        # as openai.InternalServerError.  Catch it, log a warning, and return
+        # a degraded (but still useful) response so the memory is not lost.
+        response = None
+        llm_transient_warning = None
+        try:
+            response = await mem0.add(messages=[m.model_dump() for m in memory_create.messages], **params)
+        except (openai.InternalServerError, openai.APIStatusError) as llm_err:
+            status = getattr(llm_err, "status_code", None)
+            if status in (502, 503, 529):
+                logger.warning("add_memory: LLM transient error (%s): %s", status, llm_err)
+                response = {"results": [], "warning": f"LLM temporarily unavailable ({status}), memory may be partially stored"}
+            else:
+                raise
 
         # Post-processing for new/updated memories
         add_results = response.get("results", []) if isinstance(response, dict) else []
@@ -1625,7 +1641,7 @@ async def maintenance_dedup(
                 with conn.cursor() as cur:
                     cur.execute("""
                         SELECT id::text, COALESCE(payload->>'data', payload->>'memory'),
-                               embedding,
+                               vector,
                                COALESCE((payload->>'updated_at')::timestamptz,
                                         (payload->>'created_at')::timestamptz) AS updated_at
                         FROM memories WHERE payload->>'user_id' = %s

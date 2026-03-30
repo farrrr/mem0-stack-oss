@@ -104,3 +104,5 @@ User: You told me last time that I use PostgreSQL 16 with pgvector.
 Assistant: Yes, that's in my notes. Would you like to discuss your database setup?
 User: No, I just wanted to confirm. Actually, I just upgraded to PostgreSQL 17.
 Output: {"facts": ["Upgraded to PostgreSQL 17"]}
+
+IMPORTANT: If the user's messages are in Chinese, ALL extracted facts MUST be written in Chinese. Do not translate Chinese input into English.

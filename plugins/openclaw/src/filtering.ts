@@ -48,11 +48,10 @@ export function isNoiseMessage(content: string, role: string): boolean {
     if (pattern.test(trimmed)) return true;
   }
 
-  // User messages: trivial one-word responses
-  if (role === "user") {
-    const lower = trimmed.toLowerCase().replace(/[.!?,;:]+$/g, "");
-    if (TRIVIAL_RESPONSES.has(lower)) return true;
-  }
+  // User messages: never filter trivial responses ("ok", "yes", etc.)
+  // These serve as confirmation signals for conditional assistant extraction.
+  // The extraction LLM needs to see them to judge whether the user endorsed
+  // the assistant's preceding statement.
 
   // Short assistant messages: detect empty acknowledgments
   if (role === "assistant" && trimmed.length < 300) {
