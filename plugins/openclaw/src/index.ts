@@ -17,6 +17,7 @@
 
 import type {
   AddOptions,
+  MemoryPluginRuntime,
   OpenClawPluginApi,
   PluginConfig,
   ResolvedIdentity,
@@ -147,6 +148,12 @@ const memoryPlugin = {
     registerCli(api, provider, cfg, resolve, buildSearchOptions);
 
     // ------------------------------------------------------------------
+    // Memory runtime (OpenClaw 3.31+ doctor.memory.status)
+    // ------------------------------------------------------------------
+
+    registerMemoryRuntime(api, provider);
+
+    // ------------------------------------------------------------------
     // Service lifecycle
     // ------------------------------------------------------------------
 
@@ -160,6 +167,51 @@ const memoryPlugin = {
     });
   },
 };
+
+// ============================================================================
+// Memory Runtime Registration (OpenClaw >= 3.31)
+// ============================================================================
+
+/**
+ * Register a MemoryPluginRuntime adapter so `openclaw status` /
+ * `doctor.memory.status` can probe this plugin's health.
+ *
+ * api.registerMemoryRuntime() was added in OpenClaw 3.31.
+ * If the host doesn't expose it yet, we silently skip.
+ */
+function registerMemoryRuntime(api: OpenClawPluginApi, provider: Mem0HTTPProvider): void {
+  if (typeof api.registerMemoryRuntime !== "function") return;
+
+  (api.registerMemoryRuntime as (runtime: MemoryPluginRuntime) => void)({
+    async getMemorySearchManager(_opts: { cfg?: unknown; agentId?: string; purpose?: string }) {
+      return {
+        manager: {
+          status() {
+            return { backend: "builtin", provider: "mem0-oss", model: "external" };
+          },
+          async probeEmbeddingAvailability() {
+            try {
+              const ok = await provider.health();
+              return { ok };
+            } catch (e) {
+              return { ok: false, error: String(e) };
+            }
+          },
+          async probeVectorAvailability() {
+            try {
+              return await provider.health();
+            } catch {
+              return false;
+            }
+          },
+        },
+      };
+    },
+    resolveMemoryBackendConfig(_opts: { cfg?: unknown; agentId?: string }) {
+      return { backend: "builtin" };
+    },
+  });
+}
 
 // ============================================================================
 // CLI Registration

@@ -87,6 +87,34 @@ export interface AddResult {
 }
 
 // ============================================================================
+// Memory Plugin Runtime (OpenClaw >= 3.31)
+// ============================================================================
+
+export interface MemorySearchManagerStatus {
+  backend: string;
+  provider: string;
+  model: string;
+}
+
+export interface MemorySearchManager {
+  status(): MemorySearchManagerStatus;
+  probeEmbeddingAvailability(): Promise<{ ok: boolean; error?: string }>;
+  probeVectorAvailability(): Promise<boolean>;
+}
+
+export interface MemoryPluginRuntime {
+  getMemorySearchManager(opts: {
+    cfg?: unknown;
+    agentId?: string;
+    purpose?: string;
+  }): Promise<{ manager: MemorySearchManager }>;
+  resolveMemoryBackendConfig(opts: {
+    cfg?: unknown;
+    agentId?: string;
+  }): { backend: string };
+}
+
+// ============================================================================
 // OpenClaw Plugin SDK (ambient types)
 // ============================================================================
 
