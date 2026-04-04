@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import openai
-import psycopg2
+import psycopg
+from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -199,22 +200,38 @@ def _get_classify_client():
     return _classify_client
 
 
-# --- Direct PG connection (for metadata operations outside SDK) ---
+# --- PG connection pool (for metadata operations outside SDK) ---
+_pg_pool = None
+
+
+def _get_pg_pool():
+    """Return the module-level ConnectionPool singleton, creating it on first call."""
+    global _pg_pool
+    if _pg_pool is None:
+        conninfo = (
+            f"dbname={POSTGRES_DB} user={POSTGRES_USER} "
+            f"password={POSTGRES_PASSWORD} host={POSTGRES_HOST} "
+            f"port={POSTGRES_PORT}"
+        )
+        _pg_pool = ConnectionPool(
+            conninfo=conninfo,
+            min_size=PG_POOL_MIN,
+            max_size=PG_POOL_MAX,
+        )
+    return _pg_pool
+
+
 @contextmanager
 def get_pg_conn():
-    """Create a fresh PG connection with auto-commit on success, rollback on error."""
-    conn = psycopg2.connect(
-        dbname=POSTGRES_DB, user=POSTGRES_USER, password=POSTGRES_PASSWORD,
-        host=POSTGRES_HOST, port=int(POSTGRES_PORT),
-    )
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    """Borrow a PG connection from the pool; commit on success, rollback on error."""
+    pool = _get_pg_pool()
+    with pool.connection() as conn:
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _build_graph_config() -> dict:
@@ -679,6 +696,9 @@ async def lifespan(app: FastAPI):
 
     yield
     logger.info("Shutting down.")
+    if _pg_pool is not None:
+        _pg_pool.close()
+        logger.info("PG connection pool closed.")
     mem0_instance = None
 
 
@@ -1170,13 +1190,14 @@ async def search_recall(
 
 class MemoryUpdate(BaseModel):
     data: str = Field(..., description="New memory content text.")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Optional metadata to update.")
 
 
 @app.put("/memories/{memory_id}", summary="Update a memory")
 async def update_memory(memory_id: str, body: MemoryUpdate, mem0=Depends(get_mem0), _api_key: Optional[str] = Depends(verify_api_key)):
     """Update an existing memory with new content."""
     try:
-        return await mem0.update(memory_id=memory_id, data=body.data)
+        return await mem0.update(memory_id=memory_id, data=body.data, metadata=body.metadata)
     except Exception as e:
         logger.exception("Error in update_memory:")
         raise HTTPException(status_code=500, detail=str(e))
