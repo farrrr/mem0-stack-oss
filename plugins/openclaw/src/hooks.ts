@@ -46,6 +46,16 @@ interface SessionState {
 // ============================================================================
 
 /**
+ * Extract peer ID from DM session keys.
+ * Format: agent:<agentId>:<channel>:direct:<peerId>
+ * Only matches direct (1:1) sessions; group/channel sessions return undefined.
+ */
+function extractPeerIdFromSessionKey(sessionKey: string): string | undefined {
+  const match = sessionKey.match(/^agent:[^:]+:[^:]+:direct:(.+)$/);
+  return match?.[1];
+}
+
+/**
  * Check if a session key indicates a non-interactive (cron/hook/heartbeat) session.
  * These sessions should NOT trigger memory hooks.
  */
@@ -98,7 +108,9 @@ export function registerHooks(
     }
 
     try {
-      const identity = resolve({}, ctx?.agentId);
+      // In DM sessions, isolate memories by peer ID
+      const peerId = extractPeerIdFromSessionKey(sessionKeyStr);
+      const identity = resolve({ userId: peerId }, ctx?.agentId);
       const prompt = cleanSearchQuery(rawPrompt);
       if (rawPrompt.length !== prompt.length) {
         api.logger.debug(
@@ -201,7 +213,9 @@ export function registerHooks(
     const formatted = filterMessagesForExtraction(messages, (msg: string) => api.logger.debug(msg));
     if (!formatted.length) return;
 
-    const identity = resolve({}, ctx?.agentId);
+    // In DM sessions, isolate memories by peer ID
+    const peerId = extractPeerIdFromSessionKey(sessionKeyStr);
+    const identity = resolve({ userId: peerId }, ctx?.agentId);
     const currentSessionId = session.getCurrentSessionId();
 
     // Inject "name" field so the SDK stores actor_id per message.
