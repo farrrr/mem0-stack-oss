@@ -617,7 +617,7 @@ async def lifespan(app: FastAPI):
     from mem0 import AsyncMemory
 
     logger.info("Initializing AsyncMemory...")
-    mem0_instance = await AsyncMemory.from_config(_build_config())
+    mem0_instance = AsyncMemory.from_config(_build_config())
     logger.info("AsyncMemory ready.")
 
     # Create extension tables for features beyond base SDK
@@ -811,7 +811,7 @@ async def set_config(config: Dict[str, Any], _api_key: Optional[str] = Depends(v
     from mem0 import AsyncMemory
 
     try:
-        new_instance = await AsyncMemory.from_config(config)
+        new_instance = AsyncMemory.from_config(config)
     except Exception as e:
         logger.exception("Failed to apply new configuration:")
         raise HTTPException(status_code=400, detail="Invalid configuration. Check server logs for details.")
